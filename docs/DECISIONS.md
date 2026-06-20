@@ -198,3 +198,10 @@
 - Decision: `datasets/oos/*.csv` should be pinned to LF in `.gitattributes`.
 - Rationale: Git line-ending conversion can otherwise make the same registered dataset pass on Windows and fail on Linux deployment.
 - Consequence: Hash checks remain strict on content while avoiding platform-specific CRLF/LF mismatches.
+
+## 2026-06-20 - Research dashboard panels should not cascade-fail
+
+- Decision: Scenario evaluation, threshold experiments, model-change audit, and baseline update review should render independently.
+- Decision: If one panel fails, the dashboard should show a scoped error/warning and continue with later panels.
+- Rationale: A single locked dataset or evaluation issue should not hide unrelated audit controls from the operator.
+- Consequence: Dashboard visibility is improved, but panel-level failures still require investigation before interpreting that specific panel.

@@ -366,3 +366,11 @@ Hypothesis: The online scenario evaluation failed because locked dataset hashes 
 Result: Changed locked dataset verification to hash LF-normalized CSV content, updated the five locked-OOS registry hashes to their canonical LF values, and pinned `datasets/oos/*.csv` to LF through `.gitattributes`.
 
 Current interpretation: Cross-platform deployment can now verify the same locked OOS content without weakening the no-profitability-claim boundary.
+
+## 2026-06-20 - Dashboard research panels fail independently
+
+Hypothesis: A professional review dashboard should not lose all downstream audit panels when one research comparison block fails.
+
+Result: Guarded Scenario evaluation, threshold experiments, model audit, and baseline update review independently in the dashboard renderer.
+
+Current interpretation: The dashboard is more operationally resilient: one blocked research panel surfaces its own error while the rest of the audit surface remains visible.

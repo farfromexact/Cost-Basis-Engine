@@ -53,6 +53,52 @@ def test_dashboard_evaluation_renderer_accepts_risk_preset_argument() -> None:
 
     assert "risk_limit_preset_id" in inspect.signature(_render_evaluation_report).parameters
 
+
+def test_dashboard_evaluation_failure_does_not_block_audit_panels(monkeypatch) -> None:
+    import app.dashboard as dashboard
+
+    calls = []
+
+    class FakeStreamlit:
+        def subheader(self, *args, **kwargs):
+            calls.append(("subheader", args))
+
+        def caption(self, *args, **kwargs):
+            calls.append(("caption", args))
+
+        def error(self, *args, **kwargs):
+            calls.append(("error", args))
+
+        def warning(self, *args, **kwargs):
+            calls.append(("warning", args))
+
+    def raise_evaluation_error(*args, **kwargs):
+        raise ValueError("dataset lock mismatch")
+
+    monkeypatch.setattr(dashboard, "st", FakeStreamlit())
+    monkeypatch.setattr(dashboard, "build_evaluation_report", raise_evaluation_error)
+    monkeypatch.setattr(dashboard, "build_threshold_experiment_report", raise_evaluation_error)
+    monkeypatch.setattr(dashboard, "build_model_change_audit_report", lambda: object())
+    monkeypatch.setattr(dashboard, "build_model_audit_baseline_update_preview", lambda: object())
+    monkeypatch.setattr(dashboard, "_render_model_change_audit_report", lambda report: calls.append(("model_audit", report)))
+    monkeypatch.setattr(dashboard, "_render_model_audit_baseline_update_panel", lambda preview: calls.append(("baseline_update", preview)))
+
+    dashboard._render_evaluation_report(
+        market_source="A-share / Eastmoney",
+        held_qty=10000,
+        settled_sellable_qty=10000,
+        purchasable_qty=10000,
+        max_t_ratio=0.10,
+        max_single_trade_qty=None,
+        risk_limit_preset_id="balanced",
+        fee_profile_id=None,
+        custom_fee_config=None,
+    )
+
+    assert any(name == "error" for name, _args in calls)
+    assert any(name == "model_audit" for name, _args in calls)
+    assert any(name == "baseline_update" for name, _args in calls)
+
 def test_dashboard_fee_model_defaults_to_costed_profile() -> None:
     model = _fee_model_for_execution("A-share / Eastmoney", ignore_fees=False, fee_profile_id=None, custom_fee_config=None)
 

@@ -601,3 +601,9 @@
 - Fixed online scenario evaluation failure where GitHub/Streamlit Cloud checked out locked CSV datasets with LF line endings while registry hashes had been generated from Windows CRLF working-tree bytes.
 - Updated locked-OOS hashes to canonical LF-normalized content and added `.gitattributes` to pin `datasets/oos/*.csv` to LF.
 - Validation: dataset registry/evaluation/dashboard py_compile passed; focused dataset/evaluation/dashboard tests `14 passed`; `python -m app.cli evaluate --locked-oos --target-qty 151400 --settled-sellable-qty 151400 --purchasable-qty 15100 --trade-qty 15100` completed all five locked OOS rows without hash mismatch.
+
+## 2026-06-20 - Dashboard research panels fail independently
+
+- Split the Scenario evaluation, Locked-OOS threshold experiments, Model-change audit, and Audit baseline update review rendering into independent guarded blocks.
+- A dataset/hash/evaluation exception now shows an in-panel error but no longer stops the downstream audit panels from rendering.
+- Validation: dashboard py_compile passed; dashboard evaluation tests `7 passed`; locked-OOS CLI evaluation completed all five rows.

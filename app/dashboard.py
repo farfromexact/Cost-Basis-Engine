@@ -1064,37 +1064,50 @@ def _render_evaluation_report(
     )
     if held_qty <= 0:
         st.warning("Enter a positive target / held quantity to render scenario evaluation.")
-        return
-    trade_qty = _evaluation_trade_qty(market_source, held_qty, max_t_ratio, max_single_trade_qty, risk_limit_preset_id)
-    report = build_evaluation_report(
-        scenario_names=tuple(DEFAULT_SCENARIOS) + tuple(DEFAULT_LOCKED_OOS_SCENARIOS),
-        target_qty=held_qty,
-        settled_sellable_qty=settled_sellable_qty,
-        purchasable_qty=purchasable_qty,
-        trade_qty=trade_qty,
-        fee_model=_fee_model_for_execution(market_source, False, fee_profile_id, custom_fee_config),
-    )
-    table = _build_evaluation_table(report)
-    st.dataframe(table, hide_index=True, use_container_width=True)
-    st.caption(report.report_note)
-    with st.expander("Evaluation assumptions"):
-        st.write(f"Synthetic trade quantity: {trade_qty:,}")
-        st.write("No-trade baseline is always shown as zero incremental trading PnL.")
-        st.write("Simple S->B replay is an interpretable baseline, not a production strategy claim.")
-        st.write("Trigger-engine rows are signal diagnostics only; fills and realized PnL are not inferred.")
-        st.dataframe(_build_risk_limit_preset_table(risk_limit_preset_id), hide_index=True, use_container_width=True)
-    _render_threshold_experiment_comparison(
-        build_threshold_experiment_report(
-            target_qty=held_qty,
-            settled_sellable_qty=settled_sellable_qty,
-            purchasable_qty=purchasable_qty,
-            trade_qty=trade_qty,
-            fee_model=_fee_model_for_execution(market_source, False, fee_profile_id, custom_fee_config),
-        )
-    )
-    audit_report = build_model_change_audit_report()
-    _render_model_change_audit_report(audit_report)
-    _render_model_audit_baseline_update_panel(build_model_audit_baseline_update_preview())
+    else:
+        trade_qty = _evaluation_trade_qty(market_source, held_qty, max_t_ratio, max_single_trade_qty, risk_limit_preset_id)
+        fee_model = _fee_model_for_execution(market_source, False, fee_profile_id, custom_fee_config)
+        try:
+            report = build_evaluation_report(
+                scenario_names=tuple(DEFAULT_SCENARIOS) + tuple(DEFAULT_LOCKED_OOS_SCENARIOS),
+                target_qty=held_qty,
+                settled_sellable_qty=settled_sellable_qty,
+                purchasable_qty=purchasable_qty,
+                trade_qty=trade_qty,
+                fee_model=fee_model,
+            )
+            table = _build_evaluation_table(report)
+            st.dataframe(table, hide_index=True, use_container_width=True)
+            st.caption(report.report_note)
+            with st.expander("Evaluation assumptions"):
+                st.write(f"Synthetic trade quantity: {trade_qty:,}")
+                st.write("No-trade baseline is always shown as zero incremental trading PnL.")
+                st.write("Simple S->B replay is an interpretable baseline, not a production strategy claim.")
+                st.write("Trigger-engine rows are signal diagnostics only; fills and realized PnL are not inferred.")
+                st.dataframe(_build_risk_limit_preset_table(risk_limit_preset_id), hide_index=True, use_container_width=True)
+        except Exception as exc:
+            st.error(f"Scenario evaluation unavailable: {type(exc).__name__}: {exc}")
+        try:
+            _render_threshold_experiment_comparison(
+                build_threshold_experiment_report(
+                    target_qty=held_qty,
+                    settled_sellable_qty=settled_sellable_qty,
+                    purchasable_qty=purchasable_qty,
+                    trade_qty=trade_qty,
+                    fee_model=fee_model,
+                )
+            )
+        except Exception as exc:
+            st.warning(f"Locked-OOS threshold experiments unavailable: {type(exc).__name__}: {exc}")
+    try:
+        audit_report = build_model_change_audit_report()
+        _render_model_change_audit_report(audit_report)
+    except Exception as exc:
+        st.warning(f"Model-change audit unavailable: {type(exc).__name__}: {exc}")
+    try:
+        _render_model_audit_baseline_update_panel(build_model_audit_baseline_update_preview())
+    except Exception as exc:
+        st.warning(f"Audit baseline update review unavailable: {type(exc).__name__}: {exc}")
 
 
 def _build_evaluation_table(report: EvaluationReport) -> pd.DataFrame:

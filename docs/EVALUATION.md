@@ -580,3 +580,20 @@ Observed locally:
 - Locked-OOS CLI evaluation completed all five registered rows and emitted LF-normalized content hashes.
 
 Interpretation: This validates cross-platform locked dataset verification. It does not expand OOS coverage or support profitability claims.
+
+## Dashboard Research Panel Resilience
+
+Validation commands:
+
+```powershell
+python -m py_compile app\dashboard.py tests\test_dashboard_evaluation.py
+python -m pytest tests\test_dashboard_evaluation.py -q --basetemp=pytest_tmp_eval_resilience -o cache_dir=pytest_cache_eval_resilience
+python -m app.cli evaluate --locked-oos --target-qty 151400 --settled-sellable-qty 151400 --purchasable-qty 15100 --trade-qty 15100
+```
+
+Observed locally:
+
+- Dashboard evaluation tests: `7 passed`.
+- Locked-OOS CLI evaluation completed all five registered rows.
+
+Interpretation: This validates dashboard resilience when a research panel fails. It does not change trading logic or expand OOS evidence.
