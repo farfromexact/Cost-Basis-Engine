@@ -589,3 +589,9 @@
 - Fixed a runtime dashboard crash where `main()` passed `risk_limit_preset_id` into `_render_evaluation_report`, but the renderer signature did not accept it.
 - Added a regression test confirming `_render_evaluation_report` exposes the `risk_limit_preset_id` parameter.
 - Validation: dashboard py_compile passed; dashboard evaluation/risk-limit tests `9 passed`; full suite `191 passed` with project-local pytest basetemp/cache.
+
+## 2026-06-20 - Streamlit Cloud import path fix
+
+- Fixed cloud deployment startup where executing `app/dashboard.py` directly did not put the repository root on `sys.path`, causing `ModuleNotFoundError` for `app.broker_import`.
+- Added a dashboard entrypoint bootstrap and a regression test that imports `dashboard` after switching into the `app/` directory.
+- Validation: dashboard py_compile passed; cloud-style dashboard import smoke passed; focused deployment/dashboard tests passed with 7 tests. Full suite was attempted but local Windows pytest tmp-root setup raised `PermissionError` for `tmp_path` fixture creation, so the full run was environment-blocked rather than assertion-failed.

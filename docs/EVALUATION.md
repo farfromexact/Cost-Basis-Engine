@@ -544,3 +544,22 @@ Observed locally:
 - CLI smoke wrote `.runtime\closeout_signoff_smoke\eod-signoff-scenario-mean_revert-2026-01-02.json` and returned `closeout_signoff_preview.status=READY`.
 
 Interpretation: The signoff export provides reviewed EOD audit continuity only. It does not route orders, infer fills, mutate accounting, or support profitability claims.
+
+## Streamlit Cloud Import Path Fix
+
+Validation commands:
+
+```powershell
+python -m py_compile app\dashboard.py tests\test_dashboard_deployment_import.py
+python -c "import os, sys; os.chdir('app'); sys.path=[os.getcwd()]+[p for p in sys.path if p != '']; import dashboard; print('dashboard import ok')"
+python -m pytest tests\test_dashboard_deployment_import.py tests\test_dashboard_evaluation.py -q --basetemp=.runtime\pytest-tmp-deploy-import -o cache_dir=.runtime\pytest-cache-deploy-import
+```
+
+Observed locally:
+
+- Dashboard py_compile passed.
+- Cloud-style `app/` entrypoint import returned `dashboard import ok`.
+- Focused deployment/dashboard tests: `7 passed`.
+- Full suite was attempted but blocked by local Windows pytest temp-root permissions during `tmp_path` fixture setup.
+
+Interpretation: This validates the deployment import failure fix. It is not a model-performance evaluation and does not support profitability claims.

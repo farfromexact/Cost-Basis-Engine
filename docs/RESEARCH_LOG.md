@@ -350,3 +350,11 @@ Hypothesis: A professional EOD workflow needs a deliberate reviewed snapshot, no
 Result: Added `app.closeout_signoff` with preview checks, token-gated write behavior, CLI `trigger` signoff options, and a dashboard preview panel. Writes are allowed only when the closeout is countable or no-action and the review token is supplied.
 
 Current interpretation: The app now has a cleaner end-of-day audit artifact. The snapshot does not imply broker execution, accounting recognition, or profitability.
+
+## 2026-06-20 - Streamlit Cloud import path fix
+
+Hypothesis: The online deployment failed because Streamlit Cloud executed `app/dashboard.py` with the `app/` directory as the script path, leaving the repository root off `sys.path`.
+
+Result: Added a small entrypoint bootstrap to `app.dashboard` before project imports and a regression test for cloud-style importing from the `app/` directory.
+
+Current interpretation: This is a deployment packaging fix only. It does not change model behavior, trading logic, or evaluation results.

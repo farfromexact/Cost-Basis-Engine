@@ -184,3 +184,10 @@
 - Decision: Dashboard shows signoff readiness but does not write files during refresh.
 - Rationale: A reviewed snapshot is useful for professional audit workflow, but automatic writes or blocked-state signoffs would create false assurance.
 - Consequence: Signoff artifacts can support review continuity, but they are not broker truth, accounting events, or profitability evidence.
+
+## 2026-06-20 - Dashboard entrypoint owns repository path bootstrap
+
+- Decision: `app/dashboard.py` should make the repository root importable when executed directly by Streamlit Cloud.
+- Decision: The bootstrap is limited to `sys.path` setup before project imports and must not alter runtime model behavior.
+- Rationale: Local runs often start from the repository root, while Streamlit Cloud may execute the dashboard file with `app/` as the script directory.
+- Consequence: Cloud deployment can import project packages consistently without requiring users to tune `PYTHONPATH` manually.
