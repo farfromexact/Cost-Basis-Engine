@@ -1,7 +1,16 @@
 ﻿from datetime import datetime, timedelta
 
-from app.dashboard import _scan_signal_markers
+import pandas as pd
+
+from app.dashboard import (
+    _bars_until_replay_time,
+    _current_intent_marker_row,
+    _nearest_closed_minute,
+    _scan_signal_markers,
+    _selected_time_from_chart_event,
+)
 from core.models import MinuteBar
+from research.trigger_engine import ActionType, RegimeType, SideCandidate, TradeIntent
 
 
 def test_scan_signal_markers_finds_sell_to_buy_trigger() -> None:
@@ -22,8 +31,10 @@ def test_scan_signal_markers_finds_sell_to_buy_trigger() -> None:
 
     assert not markers.empty
     assert "SB" in set(markers["signal"])
-    assert markers.iloc[-1]["action"] == "Trigger S->B"
-    assert markers.iloc[-1]["state"] == "OPEN"
+    assert markers.iloc[-1]["action"] == "Probe S->B"
+    assert markers.iloc[-1]["state"] == "PROBE"
+    assert "reason_codes" in markers.columns
+    assert "why_not_earlier" in markers.columns
 
 
 def test_scan_signal_markers_ignores_no_trade_points() -> None:
@@ -45,6 +56,90 @@ def test_scan_signal_markers_ignores_no_trade_points() -> None:
     assert markers.empty
 
 
+def test_current_intent_marker_uses_latest_closed_minute_decision() -> None:
+    market_df = pd.DataFrame(
+        [
+            {
+                "time": pd.Timestamp("2026-06-19 15:00:00"),
+                "close": 52.81,
+                "vwap_deviation_pct": -0.83,
+            }
+        ]
+    )
+    intent = TradeIntent(
+        action_type=ActionType.NO_TRADE,
+        symbol="603236",
+        timestamp="2026-06-19 15:00:00",
+        side=SideCandidate.NONE,
+        suggested_qty=0,
+        suggested_ratio=0.0,
+        reference_price=52.81,
+        trigger_price=None,
+        expected_reversion_price=None,
+        invalidation_price=None,
+        max_wait_minutes=45,
+        estimated_gross_edge=0.0,
+        estimated_fee=0.0,
+        estimated_slippage=0.0,
+        estimated_net_edge=0.0,
+        expected_cost_reduction_per_share=0.0,
+        confidence=80,
+        regime_type=RegimeType.LATE_SESSION,
+        blockers=["Close/restore window has priority."],
+        next_action="Do not open a new pair.",
+    )
+
+    row = _current_intent_marker_row(intent, market_df)
+
+    assert row["time"] == pd.Timestamp("2026-06-19 15:00:00")
+    assert row["label"] == "Current: No Trade"
+    assert row["action"] == "No Trade"
+    assert row["side"] == "None"
+    assert row["price"] == 52.81
+    assert row["suggested_ratio_pct"] == 0.0
+    assert row["vwap_deviation_pct"] == -0.83
+    assert row["reason"] == "Close/restore window has priority."
+    assert "latest closed minute" in row["note"]
+
+
+def test_replay_bars_truncate_future_minutes() -> None:
+    bars = _bars([10.0, 10.1, 10.2, 10.3])
+
+    replay_bars = _bars_until_replay_time(bars, pd.Timestamp(bars[1].ts))
+
+    assert [bar.close for bar in replay_bars] == [10.0, 10.1]
+
+
+def test_nearest_closed_minute_selects_closest_point() -> None:
+    market_df = pd.DataFrame(
+        [
+            {"time": pd.Timestamp("2026-06-19 10:31:00")},
+            {"time": pd.Timestamp("2026-06-19 10:32:00")},
+            {"time": pd.Timestamp("2026-06-19 10:33:00")},
+        ]
+    )
+
+    selected = _nearest_closed_minute(pd.Timestamp("2026-06-19 10:32:25"), market_df)
+
+    assert selected == pd.Timestamp("2026-06-19 10:32:00")
+
+
+def test_selected_time_from_chart_event_parses_minute_selection() -> None:
+    event = {"selection": {"minute_select": [{"time": "2026-06-19T10:32:00"}]}}
+
+    selected = _selected_time_from_chart_event(event)
+
+    assert selected == pd.Timestamp("2026-06-19 10:32:00")
+
+
+def test_selected_time_from_chart_event_prefers_local_time_key() -> None:
+    event = {"selection": {"minute_select": [{"time_key": "2026-06-19 10:32:00"}]}}
+
+    selected = _selected_time_from_chart_event(event)
+
+    assert selected == pd.Timestamp("2026-06-19 10:32:00")
+
+
 def test_scan_signal_markers_collapses_continuous_same_side_triggers() -> None:
     markers = _scan_signal_markers(
         symbol="TEST",
@@ -62,7 +157,7 @@ def test_scan_signal_markers_collapses_continuous_same_side_triggers() -> None:
         marker_cooldown_minutes=10,
     )
 
-    trigger_signals = list(markers.loc[markers["level"] == "Trigger", "signal"])
+    trigger_signals = list(markers.loc[markers["state"].isin(["PROBE", "CONFIRM"]), "signal"])
     assert trigger_signals == ["SB"]
 
 

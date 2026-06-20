@@ -120,6 +120,10 @@ def test_buy_to_sell_triggers_when_regime_deviation_and_inventory_pass() -> None
     assert intent.action_type is ActionType.TRIGGER_BUY_TO_SELL
     assert intent.suggested_qty == 100
     assert intent.expected_reversion_price > intent.reference_price
+    assert intent.deviation_decision is not None
+    assert intent.deviation_decision.anchor_type in {"NEUTRAL", "VWAP_REVERSION", "VWAP_RESISTANCE"}
+    assert intent.deviation_decision.exhaustion_score >= 0
+    assert intent.deviation_decision.reason_codes
 
 
 def test_sell_to_buy_rejected_when_settled_sellable_is_insufficient() -> None:

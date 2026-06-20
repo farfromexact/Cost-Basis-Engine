@@ -1,7 +1,8 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from data.yahoo import normalize_yahoo_symbol, parse_yahoo_chart
+from core.models import MinuteBar
+from data.yahoo import latest_usable_yahoo_session, normalize_yahoo_symbol, parse_yahoo_chart
 
 
 def test_normalize_yahoo_symbol_for_samsung_aliases() -> None:
@@ -77,3 +78,31 @@ def test_parse_yahoo_chart_skips_unclosed_current_minute() -> None:
 
     assert len(bars) == 1
     assert bars[0].ts.strftime("%H:%M:%S") == "09:00:00"
+
+
+def test_latest_usable_yahoo_session_skips_sparse_latest_day() -> None:
+    previous_day = [
+        _bar(datetime(2026, 6, 18, 9, 0), 75000.0),
+        _bar(datetime(2026, 6, 18, 9, 1), 75100.0),
+        _bar(datetime(2026, 6, 18, 9, 2), 75200.0),
+        _bar(datetime(2026, 6, 18, 9, 3), 75300.0),
+        _bar(datetime(2026, 6, 18, 9, 4), 75400.0),
+    ]
+    sparse_latest_day = [_bar(datetime(2026, 6, 19, 9, 0), 76000.0)]
+
+    selected = latest_usable_yahoo_session(previous_day + sparse_latest_day, min_session_bars=5)
+
+    assert [bar.ts.date().isoformat() for bar in selected] == ["2026-06-18"] * 5
+    assert selected[-1].close == 75400.0
+
+
+def _bar(ts: datetime, close: float) -> MinuteBar:
+    return MinuteBar(
+        ts=ts,
+        open=close,
+        high=close + 100.0,
+        low=close - 100.0,
+        close=close,
+        volume=1000,
+        amount=close * 1000,
+    )

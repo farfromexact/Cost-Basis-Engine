@@ -1,5 +1,93 @@
 # Research Log
 
+## 2026-06-20 - B/S lifecycle diagnostics stage 1
+
+Hypothesis: Before changing sizing and regime gates, the app needs a richer diagnostic language that explains whether a minute is watch-only, probeable, additive, confirmed, close-ready, forced, blocked, or expired.
+
+Result: Added BS downside exhaustion scoring from minute OHLCV, VWAP anchor classification (`VWAP_REVERSION`, `VWAP_RESISTANCE`, `NEUTRAL`), target rationale, reason codes, blocked reasons, and lifecycle marker states `WATCH`, `PROBE`, `ADD`, `CONFIRM`, `CLOSE_READY`, `FORCED_DECISION`, `BLOCKED`, and `EXPIRED`. Dashboard markers and detail tables now expose these fields.
+
+Current interpretation: This is a diagnostic/state-semantics upgrade, not a complete new trading policy. It does not yet implement full softer regime sizing or persistent multi-leg inventory accounting.
+
+## 2026-06-20 - Button-gated research audit page
+
+Hypothesis: Research validation and model governance should never run as a side effect of live intraday or execution review refreshes.
+
+Result: Split the dashboard into `Execution / EOD review` and `Research / Audit`. The research page shows idle controls by default, and runs scenario evaluation, locked-OOS threshold experiments, model-change audit, or baseline update review only when the corresponding button is clicked.
+
+Current interpretation: This should materially reduce rerun latency and accidental locked-OOS/audit work. It changes workflow gating only, not the research methodology or model output.
+
+## 2026-06-20 - Compact data and account status strip
+
+Hypothesis: The dashboard should keep data/source risk visible without letting detailed caveat tables dominate the homepage.
+
+Result: Added a compact status strip summarizing source grade, broker confirmation, latest bar, bar count, and rollup status. Detailed source caveats and quality checks are now collapsed by default and auto-expand only for BAD data or actionable unconfirmed signals.
+
+Current interpretation: This improves operator focus while preserving risk visibility. It does not make public feeds broker-confirmed or change the strategy evidence boundary.
+
+## 2026-06-20 - Intraday decision priority and idle persistence
+
+Hypothesis: For live use, the first rendered element should be the current `Trading decision`, and optional persisted sidebar state should not load or write unless explicitly enabled.
+
+Result: Moved `Trading decision` and core market metrics to the top of the dashboard flow. Position persistence is now unchecked by default and stays idle during reruns unless the user opts in.
+
+Current interpretation: This improves operational responsiveness and reduces incidental state I/O. It does not change the trigger engine, accounting, or evaluation evidence.
+
+## 2026-06-20 - Lazy dashboard page split
+
+Hypothesis: Live intraday use should avoid constructing execution and research-audit panels on every chart click or refresh.
+
+Result: Added a sidebar page selector. `Intraday trading` renders market/model guidance only, while `Execution & research review` lazy-loads manual fills, broker reconciliation, tickets, sensitivity, post-trade review, risk usage, closeout, execution journals, scenario evaluation, threshold experiments, model audit, and baseline review.
+
+Current interpretation: This improves Streamlit runtime behavior and reduces accidental journal/evaluation work during live use. It does not alter model output or research evidence.
+
+## 2026-06-20 - Replay click selection reliability
+
+Hypothesis: Replay click selection should use a wide chart interaction target and a stable local time key, because browser temporal serialization can shift naive exchange timestamps.
+
+Result: Replaced the transparent point click layer with full-height transparent minute rules, changed selection to return `time_key`, and bumped the chart widget key to discard stale Streamlit chart state.
+
+Current interpretation: This should make replay-at-time selection land on the intended minute inside the plot area. It does not change trigger-engine logic or any evidence boundary.
+
+## 2026-06-20 - Replay full-session chart context
+
+Hypothesis: A replay-at-time view should not visually collapse to one point when the selected minute is early in the session; only model inputs need to be truncated.
+
+Result: Replay mode now keeps full-session price and ratio charts for visual context while computing the decision summary, market metrics, current yellow marker, lifecycle scan, and layer cards from bars closed by the selected minute.
+
+Current interpretation: This resolves the misleading empty-chart UX without weakening the no-future-data model computation. Future bars can be visible as chart context, but they are not used by `TriggerEngine` for the selected replay state.
+
+## 2026-06-20 - Yahoo sparse-session fallback
+
+Hypothesis: Outside active trading, Yahoo can return a sparse current session that is not useful for intraday model interpretation; the dashboard should prefer the latest usable completed session.
+
+Result: Added Yahoo 5-day fallback selection. If the 1-day response has too few bars, the adapter picks the most recent session with enough minute bars. The dashboard intraday caption now includes session date and bar count.
+
+Current interpretation: This improves data usability in non-trading windows. Yahoo/Korea remains a prototype feed with approximate turnover amount and is not broker-confirmed execution data.
+
+## 2026-06-20 - Replay-at-time model state
+
+Hypothesis: A professional operator should be able to click any historical minute and see the model state that would have been visible using only bars closed by that minute.
+
+Result: Added chart click selection over transparent minute points. Replay mode stores the nearest closed minute, truncates bars to that point, reruns `TriggerEngine`, updates the decision summary, market metrics, current marker, lifecycle scan, and layer cards, and provides `Back to Live`.
+
+Current interpretation: This is an as-of model replay, not a full account replay. Manual fills, broker imports, execution journals, and account snapshots remain live/current until explicit historical state snapshots are implemented.
+
+## 2026-06-20 - Streamlit width API maintenance
+
+Hypothesis: Streamlit's deprecated `use_container_width` parameter can be replaced by `width="stretch"` without changing dashboard semantics.
+
+Result: Updated dashboard dataframe and Altair chart calls to the current Streamlit width API and verified that no old parameter remains.
+
+Current interpretation: This is UI/runtime maintenance only. It does not affect trigger logic, execution accounting, locked-OOS evaluation, or profitability evidence.
+
+## 2026-06-20 - Current intraday decision marker
+
+Hypothesis: The operator should see the current latest-closed-minute `TradeIntent` on the same price chart as VWAP, because historical lifecycle markers can otherwise look like the only signal annotations.
+
+Result: Added an always-visible current-decision chart marker with a yellow vertical rule, point, and `Current: ...` label. Historical lifecycle markers remain optional and continue to state that no fills, realized PnL, or cost-basis reduction are inferred.
+
+Current interpretation: This improves live readability only. It does not change trigger logic, execution accounting, locked-OOS evaluation, or profitability evidence.
+
 ## Iteration 0
 
 Hypothesis: A minimal replay engine with strict inventory and fee accounting is the highest-value baseline because it prevents false cost-basis claims before any strategy research.

@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
@@ -101,6 +101,9 @@ class FeatureSnapshot:
     minutes_to_close: int
     near_upper_limit: bool
     near_lower_limit: bool
+    exhaustion_score: float = 0.0
+    anchor_type: str = "NEUTRAL"
+    target_reason: str = ""
 
 
 @dataclass(frozen=True)
@@ -124,6 +127,12 @@ class DeviationDecision:
     net_edge_after_fee: float
     estimated_fee: float
     estimated_slippage: float
+    anchor_type: str = "NEUTRAL"
+    target_reason: str = ""
+    exhaustion_score: float = 0.0
+    liquidity_score: float = 0.0
+    reason_codes: list[str] = field(default_factory=list)
+    blocked_reasons: list[str] = field(default_factory=list)
     reasons: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
@@ -315,6 +324,7 @@ class TriggerEngine:
         residual = day_return - self.rules.beta_market * market_return - self.rules.beta_sector * sector_return
         near_upper = day_return >= self.rules.price_limit_pct - self.rules.near_limit_buffer_pct
         near_lower = day_return <= -self.rules.price_limit_pct + self.rules.near_limit_buffer_pct
+        anchor_type, target_reason = _anchor_diagnostics(bars, [row.vwap for row in features])
         return FeatureSnapshot(
             timestamp=str(bar.ts),
             price=bar.close,
@@ -334,6 +344,9 @@ class TriggerEngine:
             minutes_to_close=_minutes_to_close(bar, self.rules.close_time),
             near_upper_limit=near_upper,
             near_lower_limit=near_lower,
+            exhaustion_score=_exhaustion_score(bars),
+            anchor_type=anchor_type,
+            target_reason=target_reason,
         )
 
     def evaluate_regime(self, feature: FeatureSnapshot) -> RegimeDecision:
@@ -429,6 +442,9 @@ class TriggerEngine:
         expected_price: float | None = None
         invalidation_price: float | None = None
         gross_edge = 0.0
+        reason_codes: list[str] = []
+        blocked_reasons: list[str] = []
+        target_reason = feature.target_reason or "VWAP treated as the mean-reversion anchor."
 
         if feature.vwap_deviation >= self.rules.sb_watch_deviation:
             candidate = SideCandidate.SELL_TO_BUY
@@ -436,16 +452,35 @@ class TriggerEngine:
             invalidation_price = price * (1.0 + self.rules.expected_reversion_pct)
             gross_edge = max(0.0, price - expected_price) * preliminary_qty
             reasons.append("Price is above VWAP")
+            reason_codes.append("SB_ABOVE_VWAP")
             if feature.recent_high_breaks >= 3:
                 warnings.append("Recent consecutive highs; deviation may still extend")
+                blocked_reasons.append("RECENT_HIGH_BREAKS")
         elif feature.vwap_deviation <= self.rules.bs_watch_deviation:
             candidate = SideCandidate.BUY_TO_SELL
-            expected_price = max(feature.vwap, price * (1.0 + self.rules.expected_reversion_pct))
+            if feature.anchor_type == "VWAP_RESISTANCE":
+                repair_target = price + max(0.0, feature.vwap - price) * 0.40
+                expected_price = max(price * (1.0 + self.rules.expected_reversion_pct), repair_target)
+                target_reason = feature.target_reason or "VWAP looks like resistance; target downgraded to a partial repair zone."
+                reason_codes.append("VWAP_RESISTANCE_TARGET_DOWNGRADED")
+            else:
+                expected_price = max(feature.vwap, price * (1.0 + self.rules.expected_reversion_pct))
             invalidation_price = price * (1.0 - self.rules.expected_reversion_pct)
             gross_edge = max(0.0, expected_price - price) * preliminary_qty
             reasons.append("Price is below VWAP")
+            reason_codes.append("BS_BELOW_VWAP")
+            if feature.exhaustion_score >= 65:
+                reasons.append(f"Downside exhaustion score is supportive: {feature.exhaustion_score:.0f}/100")
+                reason_codes.append("DOWNSIDE_EXHAUSTION_SUPPORTIVE")
+            elif feature.exhaustion_score >= 40:
+                reasons.append(f"Downside exhaustion is partial: {feature.exhaustion_score:.0f}/100")
+                reason_codes.append("DOWNSIDE_EXHAUSTION_PARTIAL")
+            else:
+                warnings.append(f"Downside exhaustion is weak: {feature.exhaustion_score:.0f}/100")
+                blocked_reasons.append("DOWNSIDE_EXHAUSTION_WEAK")
             if feature.recent_low_breaks >= 3:
                 warnings.append("Recent consecutive lows; deviation may still extend")
+                blocked_reasons.append("RECENT_LOW_BREAKS")
         else:
             return DeviationDecision(
                 side_candidate=SideCandidate.NONE,
@@ -457,6 +492,11 @@ class TriggerEngine:
                 net_edge_after_fee=0.0,
                 estimated_fee=0.0,
                 estimated_slippage=0.0,
+                anchor_type=feature.anchor_type,
+                target_reason=feature.target_reason,
+                exhaustion_score=feature.exhaustion_score,
+                liquidity_score=min(100.0, feature.amount_ratio * 50.0),
+                reason_codes=["DEVIATION_BELOW_WATCH"],
                 reasons=["Deviation has not reached watch threshold"],
             )
 
@@ -471,8 +511,11 @@ class TriggerEngine:
         deviation_score = abs(feature.vwap_deviation) / trigger_threshold if trigger_threshold else 0.0
         if feature.amount_ratio < self.rules.min_amount_ratio:
             warnings.append("Turnover confirmation is weak; deviation reliability is lower")
+            blocked_reasons.append("LIQUIDITY_BELOW_TRIGGER_REQUIREMENT")
         if feature.time_normalized_zscore:
-            reasons.append(f"濠婃艾濮?z-score={feature.time_normalized_zscore:.2f}")
+            reasons.append(f"时间标准化z-score={feature.time_normalized_zscore:.2f}")
+        if net_edge <= self.rules.min_net_edge:
+            blocked_reasons.append("EDGE_AFTER_COST_BELOW_MINIMUM")
         return DeviationDecision(
             side_candidate=candidate,
             deviation_score=round(deviation_score, 4),
@@ -483,6 +526,12 @@ class TriggerEngine:
             net_edge_after_fee=round(net_edge, 4),
             estimated_fee=round(fee, 4),
             estimated_slippage=round(slippage, 4),
+            anchor_type=feature.anchor_type,
+            target_reason=target_reason,
+            exhaustion_score=round(feature.exhaustion_score, 2),
+            liquidity_score=round(min(100.0, feature.amount_ratio * 50.0), 2),
+            reason_codes=reason_codes,
+            blocked_reasons=blocked_reasons,
             reasons=reasons,
             warnings=warnings,
         )
@@ -783,6 +832,74 @@ def _rolling_zscore(values: list[float], window: int) -> float:
     return (values[-1] - mean) / std
 
 
+def _exhaustion_score(bars: list[MinuteBar]) -> float:
+    if len(bars) < 5:
+        return 0.0
+    latest = bars[-1]
+    score = 0.0
+    recent5 = bars[-5:]
+    recent15 = bars[-15:] if len(bars) >= 15 else bars
+    slope5 = recent5[-1].close / recent5[0].open - 1.0 if recent5[0].open else 0.0
+    slope15 = recent15[-1].close / recent15[0].open - 1.0 if recent15[0].open else 0.0
+    if slope15 < 0 and slope5 > slope15:
+        score += 20.0
+
+    if len(bars) >= 10:
+        prior_low = min(bar.low for bar in bars[-10:-5])
+        recent_low = min(bar.low for bar in recent5)
+        if recent_low >= prior_low * 0.997:
+            score += 18.0
+
+    if len(bars) >= 6:
+        prior_recent_low = min(bar.low for bar in bars[-6:-1])
+        if latest.low < prior_recent_low and latest.close > prior_recent_low:
+            score += 22.0
+
+    latest_range = latest.high - latest.low
+    if latest_range > 0:
+        close_location = (latest.close - latest.low) / latest_range
+        score += max(0.0, min(20.0, close_location * 20.0))
+
+    down_bars = [bar for bar in bars[-12:] if bar.close < bar.open and bar.volume > 0]
+    if len(down_bars) >= 4:
+        split = max(1, len(down_bars) // 2)
+        early = down_bars[:split]
+        late = down_bars[split:]
+        if late:
+            early_avg = sum(bar.volume for bar in early) / len(early)
+            late_avg = sum(bar.volume for bar in late) / len(late)
+            if late_avg < early_avg:
+                score += 15.0
+
+    if len(bars) >= 6 and latest.close > bars[-2].close:
+        avg_volume = sum(bar.volume for bar in bars[-6:-1]) / 5
+        if avg_volume > 0 and latest.volume >= avg_volume:
+            score += 5.0
+
+    return round(min(100.0, score), 2)
+
+
+def _anchor_diagnostics(bars: list[MinuteBar], vwap_values: list[float]) -> tuple[str, str]:
+    if len(bars) < 8 or len(vwap_values) < 8:
+        return "NEUTRAL", "Insufficient history to classify VWAP anchor."
+    latest_price = bars[-1].close
+    latest_vwap = vwap_values[-1]
+    lookback = min(20, len(bars))
+    recent_bars = bars[-lookback:]
+    recent_vwaps = vwap_values[-lookback:]
+    below_ratio = sum(1 for bar, vwap in zip(recent_bars, recent_vwaps) if bar.close < vwap) / lookback
+    vwap_base = recent_vwaps[0] or latest_vwap
+    vwap_slope = latest_vwap / vwap_base - 1.0 if vwap_base else 0.0
+    first_half = recent_bars[: max(1, lookback // 2)]
+    falling_highs = recent_bars[-1].high < max(bar.high for bar in first_half)
+    falling_lows = recent_bars[-1].low < min(bar.low for bar in first_half)
+    if latest_price < latest_vwap and below_ratio >= 0.70 and vwap_slope <= -0.0005 and (falling_highs or falling_lows):
+        return "VWAP_RESISTANCE", "VWAP is falling and price has stayed below it; use partial repair target, not full VWAP."
+    if abs(vwap_slope) <= 0.0008 and 0.25 <= below_ratio <= 0.75:
+        return "VWAP_REVERSION", "VWAP is relatively flat with two-sided trading; full VWAP can remain a reversion anchor."
+    return "NEUTRAL", "VWAP anchor is mixed; use conservative reversion target."
+
+
 def _minutes_to_close(bar: MinuteBar, close_time: str) -> int:
     close_hour, close_minute = (int(part) for part in close_time.split(":", 1))
     return max(0, (close_hour * 60 + close_minute) - (bar.ts.hour * 60 + bar.ts.minute))
@@ -794,6 +911,7 @@ def _dataclass_to_dict(value) -> dict:
         if isinstance(item, Enum):
             payload[key] = item.value
     return payload
+
 
 
 

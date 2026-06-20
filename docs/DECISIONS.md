@@ -1,5 +1,81 @@
 # Decisions
 
+## 2026-06-20 - Lifecycle markers use staged diagnostic states
+
+- Decision: Chart lifecycle markers should not use generic `OPEN`; they should distinguish `WATCH`, `PROBE`, `ADD`, `CONFIRM`, `CLOSE_READY`, `FORCED_DECISION`, `BLOCKED`, and `EXPIRED`.
+- Decision: BS diagnostics should include downside exhaustion and VWAP-anchor classification before regime/sizing policy is hardened.
+- Rationale: The operator needs to see whether the model is early probing, adding, confirming, or simply reacting late after a bounce.
+- Consequence: The UI can now audit why a minute did or did not trigger without implying execution, fills, PnL, or cost-basis reduction.
+
+## 2026-06-20 - Research audit modules require explicit execution
+
+- Decision: Scenario evaluation, locked-OOS threshold experiments, model-change audit, and baseline update review belong on `Research / Audit`, not on intraday or execution pages.
+- Decision: Each research/audit module should remain idle until the user clicks its run/load button.
+- Rationale: These modules load datasets, run baselines, verify locks, and perform governance checks; they are not required for current trading guidance.
+- Consequence: Live and execution refreshes become lighter, while research controls remain available for deliberate validation.
+
+## 2026-06-20 - Risk caveats appear as a strip before detailed tables
+
+- Decision: The homepage should show data/source/account risk first as a compact status strip, not as full caveat and quality tables.
+- Decision: Detailed `Data source caveats` and `Data quality details` should be collapsed by default and auto-expand only for BAD data or actionable unconfirmed signals.
+- Rationale: Professional users need the risk gate visible, but the homepage should prioritize current action, status, and chart context.
+- Consequence: Risk warnings remain present without crowding the main trading workflow.
+
+## 2026-06-20 - Live trading decision takes render priority
+
+- Decision: The intraday page should render `Trading decision` and core market metrics before secondary disclosure, data quality, summary, layer, lifecycle, and review panels.
+- Decision: Persisted position state is opt-in; when disabled, the app does not load from or save to the position-state file during reruns.
+- Rationale: In live use, the user needs the freshest action first, and optional state persistence should not create hidden I/O or stale defaults.
+- Consequence: Analysis panels remain available lower on the page or on the review page, but the hot path prioritizes current model guidance.
+
+## 2026-06-20 - Intraday and review workloads are separated
+
+- Decision: The default dashboard page should be `Intraday trading` and should not load execution journals, closeout review, scenario evaluation, locked-OOS experiments, model audit, or baseline review.
+- Decision: Those panels belong on `Execution & research review`, where the user deliberately opts into heavier computation and audit side effects.
+- Rationale: Streamlit reruns on interaction, so live chart/replay workflows should keep unrelated review work out of the hot path.
+- Consequence: The app is more responsive during intraday use, while research hygiene panels remain available when explicitly opened.
+
+## 2026-06-20 - Replay chart selection uses local minute keys
+
+- Decision: Replay chart selection should use a local string `time_key` for event payloads, not the temporal x-field directly.
+- Decision: The invisible interaction layer should use full-height minute rules so users can click anywhere inside the chart plot area.
+- Rationale: Temporal payloads can be serialized through browser time conventions, and small point hit targets make chart replay feel unreliable.
+- Consequence: The x-axis remains time-based for display, but replay state is resolved from a stable local exchange-minute key.
+
+## 2026-06-20 - Replay charts may show full context while model input remains as-of
+
+- Decision: Replay-at-time should keep full-session price and ratio charts visible as context, even though model input is truncated to `bars[:selected_minute]`.
+- Decision: As-of outputs remain the decision summary, market metrics, current marker, lifecycle scan, and layer diagnostics.
+- Rationale: Hiding all later chart bars makes early replay selections look like data failure and prevents selecting another minute without returning to live.
+- Consequence: The UI must clearly state that future visible chart bars are context only and are not used in the selected model state.
+
+## 2026-06-20 - Sparse Yahoo current sessions fall back to latest usable day
+
+- Decision: If Yahoo/Korea `range=1d` returns too few closed-minute bars, the adapter should fetch a 5-day window and use the latest session with enough bars.
+- Decision: The dashboard should display the selected session date and bar count in the intraday caption.
+- Rationale: A one-point off-hours chart is not useful decision support and can be mistaken for a model failure.
+- Consequence: Non-trading-time Yahoo views now prefer the previous usable trading day, but the feed remains public/prototype and not broker-confirmed.
+
+## 2026-06-20 - Replay-at-time is model-only unless state snapshots exist
+
+- Decision: Replay-at-time should recompute market features and `TriggerEngine` output from `bars[:selected_minute]`, so no future bars after the selected closed minute are used.
+- Decision: Manual fills, broker imports, execution journals, post-trade review, risk usage, closeout, and account snapshots must remain live/current until the app stores versioned historical state snapshots.
+- Rationale: Mixing as-of market replay with current broker/account evidence would be misleading unless the account state is explicitly time-versioned.
+- Consequence: Replay mode can answer "what would the model have shown then?" but cannot answer "what was my exact execution/accounting state then?".
+
+## 2026-06-20 - Keep Streamlit calls on current width API
+
+- Decision: Dashboard layout calls should use `width="stretch"` instead of deprecated `use_container_width=True`.
+- Rationale: Deprecation warnings obscure real runtime issues and the current API preserves the same stretched layout behavior.
+- Consequence: This is a presentation/runtime maintenance change only; it does not alter model behavior, execution state, or evaluation evidence.
+
+## 2026-06-20 - Current chart marker is current guidance, not execution
+
+- Decision: The intraday price chart should always display the current latest-closed-minute `TradeIntent` marker, even when historical SB/BS lifecycle markers are hidden.
+- Decision: Historical lifecycle markers remain signal-only and optional; the current marker is also signal-only and must not imply an order, fill, realized PnL, or cost-basis reduction.
+- Rationale: Professional users need to distinguish the current decision from back-scanned opportunity windows while keeping the no-execution-inference boundary clear.
+- Consequence: The chart can guide the next manual check, but broker-confirmed data, ticket feasibility, fills, restored inventory, and fees/slippage still control any countable result.
+
 ## 2026-06-18
 
 - KEEP: Build core engine before dashboard.

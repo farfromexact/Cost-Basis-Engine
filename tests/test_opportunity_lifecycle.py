@@ -15,9 +15,11 @@ def test_lifecycle_marks_close_ready_without_inferred_fill() -> None:
     )
 
     states = [event.state for event in events]
-    assert states == ["OPEN", "CLOSE_READY"]
+    assert states == ["PROBE", "CLOSE_READY"]
     assert events[-1].note == LIFECYCLE_NOTE
     assert "close readiness only" in events[-1].reason
+    assert events[0].reason_codes
+    assert events[0].why_not_earlier
 
 
 def test_lifecycle_expires_open_opportunity_after_wait_limit() -> None:
@@ -29,7 +31,7 @@ def test_lifecycle_expires_open_opportunity_after_wait_limit() -> None:
         fee_model=zero_fee_model(),
     )
 
-    assert [event.state for event in events] == ["OPEN", "EXPIRED"]
+    assert [event.state for event in events] == ["PROBE", "EXPIRED"]
 
 
 def test_lifecycle_blocks_opportunity_at_invalidation() -> None:
@@ -41,7 +43,7 @@ def test_lifecycle_blocks_opportunity_at_invalidation() -> None:
         fee_model=zero_fee_model(),
     )
 
-    assert [event.state for event in events] == ["OPEN", "BLOCKED"]
+    assert [event.state for event in events] == ["PROBE", "BLOCKED"]
     assert "invalidation" in events[-1].reason
 
 
@@ -55,7 +57,7 @@ def test_lifecycle_collapses_continuous_same_side_triggers() -> None:
         marker_cooldown_minutes=10,
     )
 
-    trigger_events = [event for event in events if event.level == "Trigger"]
+    trigger_events = [event for event in events if event.state in {"PROBE", "CONFIRM"}]
     assert [event.signal for event in trigger_events] == ["SB"]
 
 

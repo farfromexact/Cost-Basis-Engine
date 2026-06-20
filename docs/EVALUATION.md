@@ -1,4 +1,100 @@
-﻿# Evaluation
+# Evaluation
+
+## B/S Lifecycle Diagnostics Stage 1
+
+Validation scope:
+
+- Trigger diagnostics now include `exhaustion_score`, `anchor_type`, `target_reason`, `liquidity_score`, `reason_codes`, and `blocked_reasons`.
+- Lifecycle scan emits staged signal states instead of generic `OPEN`, and dashboard marker/detail outputs expose target, invalidation, inventory before/after, reason codes, blocked reasons, and why-not-earlier fields.
+- Focused validation covered trigger engine behavior, opportunity lifecycle state transitions, and dashboard signal marker rendering.
+- This does not infer fills, route orders, realize PnL, or count cost-basis reduction.
+
+## Button-Gated Research Audit Page
+
+Validation scope:
+
+- `Execution / EOD review` no longer calls scenario evaluation, threshold experiments, model audit, or baseline update review as part of page render.
+- `Research / Audit` exposes explicit buttons for scenario evaluation / locked-OOS, locked-OOS threshold experiments, model-change audit, and audit baseline update review.
+- Focused validation covered dashboard compile, signal/replay helpers, deployment import, and evaluation rendering tests.
+- This changes execution timing only; evaluation logic, locked-OOS hashes, trigger logic, fills, and cost-basis claims are unchanged.
+
+## Compact Data and Account Status Strip
+
+Validation scope:
+
+- The strip summarizes data source grade, broker-confirmed status, latest bar, bar count, and rollup status.
+- It returns WARN for research feeds without broker confirmation, BAD for unavailable data, and auto-expands detailed risk sections for BAD data or actionable unconfirmed signals.
+- Focused validation covered strip payload status, expansion rules, data quality checks, and dashboard replay helpers.
+- This changes presentation hierarchy only; trigger logic, fills, accounting, locked-OOS metrics, and cost-basis claims are unchanged.
+
+## Intraday Decision Priority and Idle Persistence
+
+Validation scope:
+
+- Persisted position state is disabled by default and is not read/written unless the checkbox is enabled.
+- The dashboard now renders trading decision and core metrics before secondary analysis/review work.
+- Focused validation covered dashboard compile, signal/replay helpers, deployment import, and evaluation rendering tests.
+- This changes UI order and state I/O behavior only; trigger logic, fills, accounting, locked-OOS metrics, and cost-basis claims are unchanged.
+
+## Lazy Dashboard Page Split
+
+Validation scope:
+
+- The intraday page now skips execution/research-review panel construction.
+- The review page explicitly lazy-loads manual fills, broker reconciliation, journal, closeout, scenario evaluation, locked-OOS experiment, audit, and baseline review panels.
+- Focused validation covered dashboard compile, signal/replay helpers, deployment import, and evaluation rendering tests.
+- This changes Streamlit runtime organization only; trigger logic, fills, accounting, locked-OOS metrics, and cost-basis claims are unchanged.
+
+## Replay Click Selection Reliability
+
+Validation scope:
+
+- Chart selection now uses local `time_key` payloads and full-height transparent minute rules.
+- Focused tests cover parsing local `time_key` selection payloads plus existing replay truncation and nearest-minute behavior.
+- This changes only interaction reliability; model logic, evaluation rows, fills, and cost-basis accounting are unchanged.
+
+## Replay Full-Session Chart Context
+
+Validation scope:
+
+- Replay-at-time model input remains truncated to the selected closed minute.
+- Price and ratio charts can show the full session as visual context while as-of outputs remain tied to the selected minute.
+- Focused validation covered dashboard replay helpers and Yahoo session fallback tests.
+- This does not change trigger logic, execution accounting, locked-OOS results, or profitability evidence.
+
+## Yahoo Sparse-Session Fallback
+
+Validation scope:
+
+- If Yahoo `range=1d` has too few closed-minute bars, a 5-day response can be split by exchange date and the latest session with enough bars is selected.
+- Focused tests cover sparse latest-day fallback to the prior usable session.
+- This changes data selection for display/model input only; it does not alter trigger thresholds, execution accounting, locked-OOS results, or profitability evidence.
+
+## Replay-at-time Model State
+
+Validation scope:
+
+- Chart clicks are captured through a transparent minute-point layer with a named `minute_select` selection.
+- The selected time is normalized to the nearest closed minute, and replay uses only `bars` up to that minute before rerunning the trigger engine.
+- Focused validation covered bar truncation, nearest-minute selection, chart-event parsing, and existing signal marker behavior.
+- This is model-state replay only; no account state, manual fill, broker import, journal, realized PnL, or cost-basis reduction is rewound or inferred.
+
+## Streamlit Width API Maintenance
+
+Validation scope:
+
+- Deprecated `use_container_width=True` dashboard calls were replaced with `width="stretch"`.
+- Validation confirmed no `use_container_width` residue in `app/dashboard.py`, successful dashboard compile, and focused dashboard tests passing.
+- This maintenance change does not alter trigger logic, fills, accounting, locked-OOS metrics, or cost-basis claims.
+
+## Current Intraday Decision Marker
+
+Validation scope:
+
+- The chart marker is a UI decision-support annotation generated from the current `TradeIntent` on the latest closed minute.
+- It is not part of locked-OOS performance evaluation, does not infer fills, and does not create realized PnL or cost-basis reduction.
+- Historical lifecycle SB/BS markers remain separate optional scan annotations.
+- Focused validation: `python -m py_compile app\dashboard.py tests\test_dashboard_signals.py`; `python -m pytest tests\test_dashboard_signals.py -q --basetemp=pytest_tmp_current_marker -o cache_dir=pytest_cache_current_marker` (4 passed; local pytest cache warnings only).
 
 V1 evaluation compares:
 

@@ -22,11 +22,26 @@ def fetch_yahoo_intraday_bars(
     symbol: str,
     timeout: float = 10.0,
     retries: int = 3,
+    min_session_bars: int = 5,
 ) -> list[MinuteBar]:
     yahoo_symbol = normalize_yahoo_symbol(symbol)
+    bars = _fetch_yahoo_chart_range(yahoo_symbol, range_value="1d", timeout=timeout, retries=retries)
+    if len(bars) >= min_session_bars:
+        return bars
+    fallback_bars = _fetch_yahoo_chart_range(yahoo_symbol, range_value="5d", timeout=timeout, retries=retries)
+    session_bars = latest_usable_yahoo_session(fallback_bars, min_session_bars=min_session_bars)
+    return session_bars or bars
+
+
+def _fetch_yahoo_chart_range(
+    yahoo_symbol: str,
+    range_value: str,
+    timeout: float,
+    retries: int,
+) -> list[MinuteBar]:
     url = (
         f"{YAHOO_CHART_URL}/{quote(yahoo_symbol)}"
-        "?range=1d&interval=1m&includePrePost=false"
+        f"?range={quote(range_value)}&interval=1m&includePrePost=false"
     )
     request = Request(
         url,
@@ -44,7 +59,20 @@ def fetch_yahoo_intraday_bars(
                 time.sleep(0.5 * (attempt + 1))
                 continue
             break
-    raise RuntimeError(f"failed to fetch Yahoo minute bars for {yahoo_symbol}: {last_error}") from last_error
+    raise RuntimeError(f"failed to fetch Yahoo minute bars for {yahoo_symbol} range={range_value}: {last_error}") from last_error
+
+
+def latest_usable_yahoo_session(bars: list[MinuteBar], min_session_bars: int = 5) -> list[MinuteBar]:
+    sessions: dict[object, list[MinuteBar]] = {}
+    for bar in bars:
+        sessions.setdefault(bar.ts.date(), []).append(bar)
+    if not sessions:
+        return []
+    for session_date in sorted(sessions, reverse=True):
+        session = sessions[session_date]
+        if len(session) >= min_session_bars:
+            return session
+    return sessions[sorted(sessions)[-1]]
 
 
 def normalize_yahoo_symbol(symbol: str) -> str:

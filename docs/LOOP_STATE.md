@@ -1,4 +1,158 @@
-﻿# Loop State
+# Loop State
+
+## 2026-06-20 - B/S lifecycle diagnostics stage 1
+
+- current_baseline: chart lifecycle markers collapsed first-leg opportunities into generic `OPEN`, while the trigger engine exposed limited diagnostics for why BS was late or blocked.
+- hypothesis: richer lifecycle states plus BS exhaustion and VWAP-anchor diagnostics will make replay/debugging useful before changing order sizing or multi-leg state.
+- expected_result: lifecycle outputs distinguish `WATCH`, `PROBE`, `ADD`, `CONFIRM`, `CLOSE_READY`, `FORCED_DECISION`, `BLOCKED`, and `EXPIRED`; marker details include anchor type, exhaustion score, target/invalidation, reason codes, blocked reasons, inventory before/after, and why-not-earlier text.
+- files_changed: `research/trigger_engine.py`, `research/opportunity_lifecycle.py`, `app/dashboard.py`, tests, `TODO.md`, docs.
+- commands_run: `python -m py_compile research\trigger_engine.py research\opportunity_lifecycle.py app\dashboard.py tests\test_trigger_engine.py tests\test_opportunity_lifecycle.py tests\test_dashboard_signals.py`; `python -m pytest tests\test_trigger_engine.py tests\test_opportunity_lifecycle.py tests\test_dashboard_signals.py -q --basetemp=pytest_tmp_signal_logic_v2 -o cache_dir=pytest_cache_signal_logic_v2`.
+- test_result: 26 passed; local pytest cache warnings only.
+- metric_result: signal diagnostics and lifecycle state semantics changed; no profitability, fill, or cost-basis metric changed.
+- observed_failure: BS/SB chart states were too coarse to explain whether the model was watching, probing, adding, confirming, or late.
+- decision: KEEP.
+- next_highest_value_question: how should softer regime gating resize or block BS probe/add under weak-down, strong-trend-down, and crash conditions?
+- known_blockers: multi-leg state is still diagnostic-only and does not yet enforce max total T position across recorded legs.
+
+## 2026-06-20 - Button-gated research audit page
+
+- current_baseline: the execution/review page still ran scenario evaluation, locked-OOS threshold experiments, model audit, and baseline update review whenever the page was opened.
+- hypothesis: research and governance modules should be isolated from both live intraday and execution review refresh paths, and should run only on explicit user action.
+- expected_result: `Execution / EOD review` loads only execution/accounting panels; `Research / Audit` keeps evaluation, threshold experiments, audit, and baseline review idle until their buttons are clicked.
+- files_changed: `app/dashboard.py`, `TODO.md`, docs.
+- commands_run: `python -m py_compile app\dashboard.py tests\test_dashboard_signals.py tests\test_dashboard_deployment_import.py tests\test_dashboard_evaluation.py`; `python -m pytest tests\test_dashboard_signals.py tests\test_dashboard_deployment_import.py tests\test_dashboard_evaluation.py -q --basetemp=pytest_tmp_research_audit_buttons -o cache_dir=pytest_cache_research_audit_buttons`.
+- test_result: 17 passed; local pytest cache warnings only.
+- metric_result: runtime/workflow gating only; no trigger, accounting, or evaluation metric changed.
+- observed_failure: slow research and audit modules were still tied to a page refresh path.
+- decision: KEEP.
+- next_highest_value_question: should quote fetching and lifecycle scanning get short TTL caches next?
+- known_blockers: research/audit results are not persisted as cached artifacts yet; button reruns recompute when clicked.
+
+## 2026-06-20 - Compact data and account status strip
+
+- current_baseline: data-source caveats and data-quality tables occupied too much homepage space before the main chart and details.
+- hypothesis: a one-line status strip can preserve the risk warning while keeping the homepage focused on current action.
+- expected_result: homepage order is trading decision, decision summary, data/account status strip, intraday market, then collapsed data-risk details and layers.
+- files_changed: `app/dashboard.py`, `tests/test_source_disclosure.py`, `TODO.md`, docs.
+- commands_run: `python -m py_compile app\dashboard.py tests\test_source_disclosure.py tests\test_data_quality.py tests\test_dashboard_signals.py`; `python -m pytest tests\test_source_disclosure.py tests\test_data_quality.py tests\test_dashboard_signals.py -q --basetemp=pytest_tmp_data_status_order -o cache_dir=pytest_cache_data_status_order`.
+- test_result: 18 passed; local pytest cache warnings only.
+- metric_result: UI hierarchy change only; no trigger threshold, fill, accounting, or evaluation metric changed.
+- observed_failure: risk/caveat panels were valuable but too large for the homepage core area.
+- decision: KEEP.
+- next_highest_value_question: should trigger-only pre-trade ticket loading get an explicit `Load ticket` button on the intraday page?
+- known_blockers: broker confirmation and account status still require explicit broker/manual inputs; the status strip cannot prove tradability by itself.
+
+## 2026-06-20 - Intraday decision priority and idle persistence
+
+- current_baseline: sidebar position persistence was on by default, and intraday rendering showed disclosure/analysis before the top trading decision.
+- hypothesis: live use should keep persistence idle unless explicitly enabled and should render the trading decision before secondary analysis.
+- expected_result: refreshes first display the current/replay `Trading decision` and core metrics; position state is not loaded or saved unless the user opts in.
+- files_changed: `app/dashboard.py`, `TODO.md`, docs.
+- commands_run: `python -m py_compile app\dashboard.py tests\test_dashboard_signals.py tests\test_dashboard_deployment_import.py tests\test_dashboard_evaluation.py`; `python -m pytest tests\test_dashboard_signals.py tests\test_dashboard_deployment_import.py tests\test_dashboard_evaluation.py -q --basetemp=pytest_tmp_intraday_priority -o cache_dir=pytest_cache_intraday_priority`.
+- test_result: 17 passed; local pytest cache warnings only.
+- metric_result: runtime/UI ordering change only; no model threshold, fill, accounting, or evaluation metric changed.
+- observed_failure: user wanted the persistence module closed/idle by default and trading decision at the top for live timeliness.
+- decision: KEEP.
+- next_highest_value_question: should lifecycle marker scanning also be optional by default unless chart markers are enabled?
+- known_blockers: Streamlit still reruns the Python script on interaction; ordering and branch gating reduce perceived and actual hot-path work but are not full async scheduling.
+
+## 2026-06-20 - Lazy dashboard page split
+
+- current_baseline: intraday refreshes and chart replay clicks still constructed execution, journal, closeout, scenario evaluation, threshold, audit, and baseline review panels in the same page flow.
+- hypothesis: separating intraday guidance from execution/research review will reduce repeated Streamlit work during live monitoring.
+- expected_result: default page renders only market/model guidance; review page lazy-loads manual fills, broker reconciliation, execution journal, closeout, scenario evaluation, locked-OOS experiments, model audit, and baseline review.
+- files_changed: `app/dashboard.py`, `TODO.md`, docs.
+- commands_run: `python -m py_compile app\dashboard.py tests\test_dashboard_signals.py tests\test_dashboard_deployment_import.py tests\test_dashboard_evaluation.py`; `python -m pytest tests\test_dashboard_signals.py tests\test_dashboard_deployment_import.py tests\test_dashboard_evaluation.py -q --basetemp=pytest_tmp_dashboard_lazy_pages -o cache_dir=pytest_cache_dashboard_lazy_pages`.
+- test_result: 17 passed; local pytest cache warnings only.
+- metric_result: runtime/UI organization change only; no trigger, accounting, or evaluation metric changed.
+- observed_failure: live chart interactions were too expensive because unrelated review panels were loaded in the same rerun.
+- decision: KEEP.
+- next_highest_value_question: should heavy review subpanels get their own expanders/tabs with additional per-panel lazy gates?
+- known_blockers: Streamlit still reruns the script on interaction, so the optimization relies on branch gating rather than independent frontend state.
+
+## 2026-06-20 - Replay click selection reliability
+
+- current_baseline: clicking the chart could trigger a Streamlit rerun without landing on the intended minute.
+- hypothesis: the selection layer was too narrow, and temporal selection values could be browser/UTC serialized before nearest-minute matching.
+- expected_result: clicking anywhere inside the price plot area selects the intended nearest closed minute using a stable local `time_key`.
+- files_changed: `app/dashboard.py`, `tests/test_dashboard_signals.py`, `TODO.md`, docs.
+- commands_run: `python -m py_compile app\dashboard.py tests\test_dashboard_signals.py`; `python -m pytest tests\test_dashboard_signals.py -q --basetemp=pytest_tmp_replay_chart_v2 -o cache_dir=pytest_cache_replay_chart_v2`.
+- test_result: 8 passed; local pytest cache warnings only.
+- metric_result: UI interaction fix only; no model threshold, fill, or evaluation metric changed.
+- observed_failure: user clicked a time location, the app reran, but replay did not move to that minute.
+- decision: KEEP.
+- next_highest_value_question: should a visible replay-minute selector be added as a non-chart fallback control?
+- known_blockers: Streamlit/Altair click behavior still requires clicking inside the plot area, not on browser chrome or outside the chart canvas.
+
+## 2026-06-20 - Replay full-session chart context
+
+- current_baseline: replay mode truncated both model input and chart display to the selected minute, so replaying 09:00 looked like an empty one-point session.
+- hypothesis: model input should remain as-of selected minute, but chart display should keep full-session visual context so the user can see the prior trading day and select other minutes.
+- expected_result: replay metrics, summary, layers, lifecycle scan, and yellow marker remain as-of selected time; price and ratio charts show full session context.
+- files_changed: `app/dashboard.py`, `TODO.md`, docs.
+- commands_run: `python -m py_compile app\dashboard.py tests\test_dashboard_signals.py tests\test_yahoo.py`; `python -m pytest tests\test_dashboard_signals.py tests\test_yahoo.py -q --basetemp=pytest_tmp_replay_full_chart_context -o cache_dir=pytest_cache_replay_full_chart_context`.
+- test_result: 11 passed; local pytest cache warnings only.
+- metric_result: UI replay-context change only; no trigger threshold or evaluation metric changed.
+- observed_failure: user saw a one-point chart after refresh because Streamlit session state preserved a 09:00 replay selection.
+- decision: KEEP.
+- next_highest_value_question: should replay mode get an explicit sidebar state control in addition to chart click and `Back to Live`?
+- known_blockers: replay mode still does not rewind broker/account/manual-fill state.
+
+## 2026-06-20 - Yahoo sparse-session fallback
+
+- current_baseline: Yahoo/Korea `range=1d` could return only one sparse closed-minute bar outside active trading, leaving the dashboard chart effectively empty.
+- hypothesis: when the latest Yahoo `1d` response has too few bars, the adapter should fetch a longer 5-day window and return the most recent usable session.
+- expected_result: non-trading-time Korea/Yahoo dashboard shows the previous usable trading day with enough bars instead of a one-point chart, and the intraday caption shows session date plus bar count.
+- files_changed: `data/yahoo.py`, `app/dashboard.py`, `tests/test_yahoo.py`, `TODO.md`, docs.
+- commands_run: `python -m py_compile data\yahoo.py app\dashboard.py tests\test_yahoo.py tests\test_dashboard_signals.py`; `python -m pytest tests\test_yahoo.py tests\test_dashboard_signals.py -q --basetemp=pytest_tmp_yahoo_session_caption -o cache_dir=pytest_cache_yahoo_session_caption`.
+- test_result: 11 passed; local pytest cache warnings only.
+- metric_result: data availability fallback only; no strategy or profitability metric changed.
+- observed_failure: user saw a nearly empty chart with one 09:00 bar in non-trading time.
+- decision: KEEP.
+- next_highest_value_question: should A-share/Eastmoney get the same explicit multi-day fallback if its provider ever returns a sparse current-day shell?
+- known_blockers: Yahoo remains a prototype public feed with approximate turnover amount.
+
+## 2026-06-20 - Replay-at-time model state
+
+- current_baseline: the chart could show the latest decision marker and optional full-day lifecycle markers, but selecting a historical minute did not recompute the model as of that moment.
+- hypothesis: click-to-replay on a closed minute lets the operator inspect what the model would have shown at that time without using future bars.
+- expected_result: clicking a minute on the price chart switches to replay mode, truncates `bars` to the selected minute, reruns `TriggerEngine`, moves the yellow current marker, updates summary/metrics/layers, and offers `Back to Live`.
+- files_changed: `app/dashboard.py`, `tests/test_dashboard_signals.py`, `TODO.md`, docs.
+- commands_run: `python -m py_compile app\dashboard.py tests\test_dashboard_signals.py`; `python -m pytest tests\test_dashboard_signals.py -q --basetemp=pytest_tmp_replay_marker -o cache_dir=pytest_cache_replay_marker`; bare-mode Streamlit chart selection smoke.
+- test_result: 7 passed; Streamlit accepted chart selection parameters; local pytest cache warnings only.
+- metric_result: model-state replay only; no fills, realized PnL, or cost-basis reduction are inferred.
+- observed_failure: users could see full-day trajectory but could not ask what the model knew at a specific historical minute.
+- decision: KEEP.
+- next_highest_value_question: should replay mode later include versioned account/manual-fill state snapshots, or should it remain model-only?
+- known_blockers: broker fills, manual fills, execution journals, and account snapshots are not rewound in replay mode.
+
+## 2026-06-20 - Streamlit width API maintenance
+
+- current_baseline: Streamlit startup printed repeated deprecation warnings for `use_container_width`.
+- hypothesis: replacing the deprecated parameter with `width="stretch"` preserves the same stretched layout without warnings.
+- expected_result: dashboard has no `use_container_width` residue; compile and focused dashboard tests pass.
+- files_changed: `app/dashboard.py`, `TODO.md`, docs.
+- commands_run: `rg -n "use_container_width" app\dashboard.py`; `python -m py_compile app\dashboard.py tests\test_dashboard_signals.py tests\test_dashboard_deployment_import.py`; `python -m pytest tests\test_dashboard_signals.py tests\test_dashboard_deployment_import.py -q --basetemp=pytest_tmp_streamlit_width -o cache_dir=pytest_cache_streamlit_width`.
+- test_result: no deprecated parameter residue; 6 passed; local pytest cache warnings only.
+- metric_result: UI maintenance only; no strategy or evaluation metric changed.
+- observed_failure: Streamlit emitted removal warnings for `use_container_width`.
+- decision: KEEP.
+- next_highest_value_question: should local pytest cache/temp paths be moved under `.runtime` to avoid repeated Windows permission warnings?
+- known_blockers: public-feed data and only five locked OOS rows remain insufficient for profitability or production-validity claims.
+
+## 2026-06-20 - Current intraday decision marker
+
+- current_baseline: intraday chart could show historical lifecycle SB/BS markers, but the latest closed-minute `TradeIntent` was only visible in the decision summary/table.
+- hypothesis: showing the current decision directly on the price chart reduces confusion between back-scanned lifecycle markers and the actionable current prompt.
+- expected_result: price chart always shows one current marker at the latest closed minute; historical markers remain optional and signal-only.
+- files_changed: `app/dashboard.py`, `tests/test_dashboard_signals.py`, `TODO.md`, docs.
+- commands_run: `python -m py_compile app\dashboard.py tests\test_dashboard_signals.py`; `python -m pytest tests\test_dashboard_signals.py -q --basetemp=pytest_tmp_current_marker -o cache_dir=pytest_cache_current_marker`.
+- test_result: 4 passed; local pytest cache warnings only.
+- metric_result: UI-only decision-support improvement; no profitability or execution metric is inferred.
+- observed_failure: user could not see the current minute action on the main intraday chart.
+- decision: MODIFY.
+- next_highest_value_question: should the current marker also expose ticket-blocked status color once broker snapshot checks are available?
+- known_blockers: public-feed data and only five locked OOS rows remain insufficient for profitability or production-validity claims.
 
 ## Iteration 0
 
