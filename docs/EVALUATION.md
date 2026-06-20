@@ -563,3 +563,20 @@ Observed locally:
 - Full suite was attempted but blocked by local Windows pytest temp-root permissions during `tmp_path` fixture setup.
 
 Interpretation: This validates the deployment import failure fix. It is not a model-performance evaluation and does not support profitability claims.
+
+## Streamlit Cloud Locked-OOS Hash Fix
+
+Validation commands:
+
+```powershell
+python -m py_compile research\dataset_registry.py research\evaluation_report.py app\dashboard.py tests\test_dataset_registry.py tests\test_evaluation_report.py
+python -m pytest tests\test_dataset_registry.py tests\test_evaluation_report.py tests\test_dashboard_evaluation.py -q --basetemp=pytest_tmp_dataset_hash_fix -o cache_dir=pytest_cache_dataset_hash_fix
+python -m app.cli evaluate --locked-oos --target-qty 151400 --settled-sellable-qty 151400 --purchasable-qty 15100 --trade-qty 15100
+```
+
+Observed locally:
+
+- Focused dataset/evaluation/dashboard tests: `14 passed`.
+- Locked-OOS CLI evaluation completed all five registered rows and emitted LF-normalized content hashes.
+
+Interpretation: This validates cross-platform locked dataset verification. It does not expand OOS coverage or support profitability claims.

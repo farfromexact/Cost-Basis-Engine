@@ -358,3 +358,11 @@ Hypothesis: The online deployment failed because Streamlit Cloud executed `app/d
 Result: Added a small entrypoint bootstrap to `app.dashboard` before project imports and a regression test for cloud-style importing from the `app/` directory.
 
 Current interpretation: This is a deployment packaging fix only. It does not change model behavior, trading logic, or evaluation results.
+
+## 2026-06-20 - Streamlit Cloud locked-OOS hash fix
+
+Hypothesis: The online scenario evaluation failed because locked dataset hashes were generated from Windows CRLF bytes, while Streamlit Cloud evaluated GitHub checkout files with LF bytes.
+
+Result: Changed locked dataset verification to hash LF-normalized CSV content, updated the five locked-OOS registry hashes to their canonical LF values, and pinned `datasets/oos/*.csv` to LF through `.gitattributes`.
+
+Current interpretation: Cross-platform deployment can now verify the same locked OOS content without weakening the no-profitability-claim boundary.

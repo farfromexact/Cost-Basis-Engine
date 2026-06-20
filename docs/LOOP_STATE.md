@@ -595,3 +595,9 @@
 - Fixed cloud deployment startup where executing `app/dashboard.py` directly did not put the repository root on `sys.path`, causing `ModuleNotFoundError` for `app.broker_import`.
 - Added a dashboard entrypoint bootstrap and a regression test that imports `dashboard` after switching into the `app/` directory.
 - Validation: dashboard py_compile passed; cloud-style dashboard import smoke passed; focused deployment/dashboard tests passed with 7 tests. Full suite was attempted but local Windows pytest tmp-root setup raised `PermissionError` for `tmp_path` fixture creation, so the full run was environment-blocked rather than assertion-failed.
+
+## 2026-06-20 - Streamlit Cloud locked-OOS hash fix
+
+- Fixed online scenario evaluation failure where GitHub/Streamlit Cloud checked out locked CSV datasets with LF line endings while registry hashes had been generated from Windows CRLF working-tree bytes.
+- Updated locked-OOS hashes to canonical LF-normalized content and added `.gitattributes` to pin `datasets/oos/*.csv` to LF.
+- Validation: dataset registry/evaluation/dashboard py_compile passed; focused dataset/evaluation/dashboard tests `14 passed`; `python -m app.cli evaluate --locked-oos --target-qty 151400 --settled-sellable-qty 151400 --purchasable-qty 15100 --trade-qty 15100` completed all five locked OOS rows without hash mismatch.

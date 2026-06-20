@@ -191,3 +191,10 @@
 - Decision: The bootstrap is limited to `sys.path` setup before project imports and must not alter runtime model behavior.
 - Rationale: Local runs often start from the repository root, while Streamlit Cloud may execute the dashboard file with `app/` as the script directory.
 - Consequence: Cloud deployment can import project packages consistently without requiring users to tune `PYTHONPATH` manually.
+
+## 2026-06-20 - Locked OOS hashes are LF-normalized
+
+- Decision: Locked CSV dataset hashes should be computed from canonical LF-normalized content.
+- Decision: `datasets/oos/*.csv` should be pinned to LF in `.gitattributes`.
+- Rationale: Git line-ending conversion can otherwise make the same registered dataset pass on Windows and fail on Linux deployment.
+- Consequence: Hash checks remain strict on content while avoiding platform-specific CRLF/LF mismatches.

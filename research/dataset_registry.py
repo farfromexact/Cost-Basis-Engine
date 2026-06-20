@@ -109,7 +109,7 @@ DATASET_REGISTRY: dict[str, DatasetRecord] = {
         ),
         kind=DATASET_KIND_CSV,
         data_path="datasets/oos/000001_20260612_yahoo_intraday.csv",
-        content_sha256="0470e0fce70e2a5dc13c71a3ce659a05ed7665f7452c994d37820a68791c0f3a",
+        content_sha256="080007a1cb29c5c844eacde8e59c757e423c91ec8cfb443137aeca9d8a9970c2",
         locked=True,
     ),
     "oos_300750_20260616_yahoo": DatasetRecord(
@@ -126,7 +126,7 @@ DATASET_REGISTRY: dict[str, DatasetRecord] = {
         ),
         kind=DATASET_KIND_CSV,
         data_path="datasets/oos/300750_20260616_yahoo_intraday.csv",
-        content_sha256="bd377511fb4281a87947ade46f01276afa4e4c8e6b35a577d2a74e61417e64f2",
+        content_sha256="8f29434094a704a5c0637f567f7df5d69f384091098436c77c8fe6d8669d6fbb",
         locked=True,
     ),
     "oos_000858_20260617_yahoo": DatasetRecord(
@@ -143,7 +143,7 @@ DATASET_REGISTRY: dict[str, DatasetRecord] = {
         ),
         kind=DATASET_KIND_CSV,
         data_path="datasets/oos/000858_20260617_yahoo_intraday.csv",
-        content_sha256="5b5a93def674502d3329b00300257e6a6f6f1d3bc17aeec8212d40e5e4c971e2",
+        content_sha256="7fed1b01939ef87f3f2ddedaff65f3056a4add6564b5b259b0e1e57f1e54d223",
         locked=True,
     ),    "oos_300750_20260618_eastmoney": DatasetRecord(
         dataset_id="locked_oos_300750_20260618_eastmoney_v1",
@@ -159,7 +159,7 @@ DATASET_REGISTRY: dict[str, DatasetRecord] = {
         ),
         kind=DATASET_KIND_CSV,
         data_path="datasets/oos/300750_20260618_eastmoney_intraday.csv",
-        content_sha256="c31ec2034a3b3d80b3d0460cd6602b66413b33728795dbd6c3a2fa5e01d05f1b",
+        content_sha256="7a06e3796d363d13535ac6bae3aff5140d69d87941f12f7eade0e30e5979208e",
         locked=True,
     ),    "oos_000001_20260618_eastmoney": DatasetRecord(
         dataset_id="locked_oos_000001_20260618_eastmoney_v1",
@@ -175,7 +175,7 @@ DATASET_REGISTRY: dict[str, DatasetRecord] = {
         ),
         kind=DATASET_KIND_CSV,
         data_path="datasets/oos/000001_20260618_eastmoney_intraday.csv",
-        content_sha256="f49358b32e3a8904ef5b2251d8a749ff79e9175bbc4d3767c5c643183751dc7d",
+        content_sha256="6fa7c69d52bbbcbb19075fd6b6b18f728e26c2fe326cfccf14a662a3b2347a76",
         locked=True,
     ),
 }
@@ -219,11 +219,8 @@ def verify_dataset_lock(record: DatasetRecord, root: str | Path = ".") -> str:
 
 
 def file_sha256(path: str | Path) -> str:
-    digest = hashlib.sha256()
-    with Path(path).open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+    data = Path(path).read_bytes().replace(b"\r\n", b"\n")
+    return hashlib.sha256(data).hexdigest()
 
 
 def split_summary(records: list[DatasetRecord]) -> dict:
