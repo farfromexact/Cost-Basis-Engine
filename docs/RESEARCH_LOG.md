@@ -374,3 +374,11 @@ Hypothesis: A professional review dashboard should not lose all downstream audit
 Result: Guarded Scenario evaluation, threshold experiments, model audit, and baseline update review independently in the dashboard renderer.
 
 Current interpretation: The dashboard is more operationally resilient: one blocked research panel surfaces its own error while the rest of the audit surface remains visible.
+
+## 2026-06-20 - Streamlit Cloud stale module cache fix
+
+Hypothesis: The deployed app showed the newer guarded dashboard blocks but still used old locked-OOS hashes because Streamlit retained cached imported project modules across reruns.
+
+Result: Dashboard startup now clears cached project submodules before importing app/core/data/research dependencies, forcing redeployed code to load fresh module contents.
+
+Current interpretation: This is a deployment runtime consistency fix. It does not alter strategy logic or evaluation interpretation.

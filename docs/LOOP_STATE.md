@@ -607,3 +607,9 @@
 - Split the Scenario evaluation, Locked-OOS threshold experiments, Model-change audit, and Audit baseline update review rendering into independent guarded blocks.
 - A dataset/hash/evaluation exception now shows an in-panel error but no longer stops the downstream audit panels from rendering.
 - Validation: dashboard py_compile passed; dashboard evaluation tests `7 passed`; locked-OOS CLI evaluation completed all five rows.
+
+## 2026-06-20 - Streamlit Cloud stale module cache fix
+
+- Fixed a deployment state where Streamlit reran newer `app/dashboard.py` code while retaining cached old project modules such as `research.dataset_registry`.
+- Dashboard startup now clears cached project submodules before importing project dependencies, forcing redeploys to load the current committed code from disk.
+- Validation: dashboard/deployment py_compile passed; deployment/dashboard tests `9 passed`; locked-OOS CLI evaluation completed all five rows.

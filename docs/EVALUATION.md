@@ -597,3 +597,20 @@ Observed locally:
 - Locked-OOS CLI evaluation completed all five registered rows.
 
 Interpretation: This validates dashboard resilience when a research panel fails. It does not change trading logic or expand OOS evidence.
+
+## Streamlit Cloud Stale Module Cache Fix
+
+Validation commands:
+
+```powershell
+python -m py_compile app\dashboard.py tests\test_dashboard_deployment_import.py
+python -m pytest tests\test_dashboard_deployment_import.py tests\test_dashboard_evaluation.py -q --basetemp=pytest_tmp_deploy_cache_refresh -o cache_dir=pytest_cache_deploy_cache_refresh
+python -m app.cli evaluate --locked-oos --target-qty 151400 --settled-sellable-qty 151400 --purchasable-qty 15100 --trade-qty 15100
+```
+
+Observed locally:
+
+- Deployment/dashboard tests: `9 passed`.
+- Locked-OOS CLI evaluation completed all five registered rows.
+
+Interpretation: This validates deployment module freshness. It does not add OOS evidence or change model behavior.

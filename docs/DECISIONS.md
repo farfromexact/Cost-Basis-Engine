@@ -205,3 +205,10 @@
 - Decision: If one panel fails, the dashboard should show a scoped error/warning and continue with later panels.
 - Rationale: A single locked dataset or evaluation issue should not hide unrelated audit controls from the operator.
 - Consequence: Dashboard visibility is improved, but panel-level failures still require investigation before interpreting that specific panel.
+
+## 2026-06-20 - Dashboard reloads project modules after deploy
+
+- Decision: The Streamlit dashboard should clear cached project submodules before importing dependencies.
+- Decision: This cache refresh is limited to local project prefixes: `app.`, `core.`, `data.`, and `research.`.
+- Rationale: Streamlit reruns the script inside a long-lived process; stale imported modules can otherwise survive code redeploys and produce impossible mixed-version states.
+- Consequence: Deployment behavior is more deterministic, while runtime data state and trading logic remain unchanged.

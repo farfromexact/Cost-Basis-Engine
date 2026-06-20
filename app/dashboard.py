@@ -7,6 +7,16 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+
+def _refresh_project_modules_after_deploy() -> None:
+    project_prefixes = ("app.", "core.", "data.", "research.")
+    for module_name in list(sys.modules):
+        if module_name != __name__ and module_name.startswith(project_prefixes):
+            sys.modules.pop(module_name, None)
+
+
+_refresh_project_modules_after_deploy()
+
 import time
 from datetime import datetime
 
