@@ -1,0 +1,83 @@
+{
+  "baseline_id": "locked_oos_audit_baseline_v1",
+  "evaluation_metrics": {
+    "oos_000001_20260612_yahoo": {
+      "bar_count": 330,
+      "dataset_id": "locked_oos_000001_20260612_yahoo_v1",
+      "latest_action": "NO_TRADE",
+      "latest_blocker_count": 1,
+      "latest_warning_count": 0,
+      "no_trade_count": 162,
+      "trigger_count": 22,
+      "watch_count": 146
+    },
+    "oos_000001_20260618_eastmoney": {
+      "bar_count": 241,
+      "dataset_id": "locked_oos_000001_20260618_eastmoney_v1",
+      "latest_action": "NO_TRADE",
+      "latest_blocker_count": 1,
+      "latest_warning_count": 0,
+      "no_trade_count": 50,
+      "trigger_count": 17,
+      "watch_count": 174
+    },
+    "oos_000858_20260617_yahoo": {
+      "bar_count": 330,
+      "dataset_id": "locked_oos_000858_20260617_yahoo_v1",
+      "latest_action": "NO_TRADE",
+      "latest_blocker_count": 1,
+      "latest_warning_count": 0,
+      "no_trade_count": 250,
+      "trigger_count": 0,
+      "watch_count": 80
+    },
+    "oos_300750_20260616_yahoo": {
+      "bar_count": 330,
+      "dataset_id": "locked_oos_300750_20260616_yahoo_v1",
+      "latest_action": "NO_TRADE",
+      "latest_blocker_count": 1,
+      "latest_warning_count": 0,
+      "no_trade_count": 155,
+      "trigger_count": 12,
+      "watch_count": 163
+    },
+    "oos_300750_20260618_eastmoney": {
+      "bar_count": 240,
+      "dataset_id": "locked_oos_300750_20260618_eastmoney_v1",
+      "latest_action": "NO_TRADE",
+      "latest_blocker_count": 1,
+      "latest_warning_count": 0,
+      "no_trade_count": 40,
+      "trigger_count": 36,
+      "watch_count": 164
+    }
+  },
+  "locked_oos_scenarios": [
+    "oos_000001_20260612_yahoo",
+    "oos_300750_20260616_yahoo",
+    "oos_000858_20260617_yahoo",
+    "oos_300750_20260618_eastmoney",
+    "oos_000001_20260618_eastmoney"
+  ],
+  "note": "Initial locked-OOS audit baseline. It is used to detect trigger-threshold or signal-metric drift; it is not profitability evidence.",
+  "trigger_thresholds": {
+    "bs_trigger_deviation": -0.006,
+    "bs_watch_deviation": -0.003,
+    "close_time": "15:00",
+    "expected_reversion_pct": 0.002,
+    "force_restore_time": "14:50",
+    "latest_open_time": "14:35",
+    "max_wait_minutes": 45,
+    "min_amount_ratio": 1.2,
+    "min_net_edge": 0.0,
+    "min_trigger_deviation_score": 1.0,
+    "near_limit_buffer_pct": 0.015,
+    "price_limit_pct": 0.1,
+    "risk_buffer_pct": 0.001,
+    "sb_trigger_deviation": 0.006,
+    "sb_watch_deviation": 0.003,
+    "start_time": "09:45",
+    "trend_day_return_pct": 0.02,
+    "trend_recent_return_pct": 0.004
+  }
+}
