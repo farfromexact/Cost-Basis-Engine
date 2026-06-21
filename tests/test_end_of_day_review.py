@@ -42,6 +42,17 @@ def test_end_of_day_review_no_journals_preserves_no_action_closeout() -> None:
     assert any(row.item == "latest_persisted_journal" and row.status == "NO_DATA" for row in report.rows)
 
 
+def test_end_of_day_review_warns_when_closeout_has_freshness_warning() -> None:
+    closeout = _closeout(status="WARN", countable=False, reduction=0.0)
+
+    report = build_end_of_day_review_report(closeout, [])
+
+    assert report.status == "WARN"
+    assert report.closeout_status == "WARN"
+    assert "Current closeout has warnings" in report.summary
+    assert any(row.item == "current_closeout" and row.status == "WARN" for row in report.rows)
+
+
 def _closeout(status: str, countable: bool, reduction: float) -> SessionCloseoutReport:
     return SessionCloseoutReport(
         status=status,

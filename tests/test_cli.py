@@ -1,8 +1,8 @@
 from types import SimpleNamespace
 
-from app.cli import _args_with_position_state, _fee_config_from_args, _fee_profile_id_from_args
+from app.cli import _args_with_position_state, _data_source_from_snapshot, _fee_config_from_args, _fee_profile_id_from_args, _market_source_from_args, _rules_config_from_args
 from app.position_state import PositionSnapshot, load_position_snapshot, save_position_snapshot
-from core.fee_profiles import DEFAULT_A_SHARE_FEE_PROFILE_ID, ZERO_FEE_PROFILE_ID
+from core.fee_profiles import DEFAULT_A_SHARE_FEE_PROFILE_ID, DEFAULT_US_FEE_PROFILE_ID, ZERO_FEE_PROFILE_ID
 
 
 def test_cli_fee_config_is_explicitly_configurable() -> None:
@@ -17,6 +17,18 @@ def test_cli_fee_config_is_explicitly_configurable() -> None:
         other_fee_rate=0.6,
         buy_slippage_rate=0.7,
         sell_slippage_rate=0.8,
+        a_share_handling_fee_bps=1.1,
+        a_share_management_fee_bps=1.2,
+        a_share_transfer_fee_bps=1.3,
+        a_share_stamp_duty_sell_bps=1.4,
+        a_share_broker_commission_bps=1.5,
+        a_share_min_commission_cny=1.6,
+        us_sec_fee_per_million=2.1,
+        us_finra_taf_per_share=2.2,
+        us_finra_taf_cap_per_trade=2.3,
+        us_broker_commission_per_share=2.4,
+        us_broker_min_commission=2.5,
+        us_platform_fee_per_order=2.6,
     )
 
     config = _fee_config_from_args(args)
@@ -29,6 +41,42 @@ def test_cli_fee_config_is_explicitly_configurable() -> None:
     assert config.other_fee_rate == 0.6
     assert config.buy_slippage_rate == 0.7
     assert config.sell_slippage_rate == 0.8
+    assert config.market == "A_SHARE"
+    assert config.a_share_handling_fee_bps == 1.1
+    assert config.a_share_broker_commission_bps == 1.5
+    assert config.a_share_min_commission_cny == 1.6
+
+
+def test_cli_us_custom_fee_components_are_configurable() -> None:
+    args = SimpleNamespace(
+        fee_profile="custom_manual",
+        ignore_fees=False,
+        data_source="us_yahoo",
+        buy_commission_rate=0.0,
+        sell_commission_rate=0.0,
+        min_commission=0.0,
+        stamp_tax_rate=0.0,
+        transfer_fee_rate=0.0,
+        other_fee_rate=0.0,
+        buy_slippage_rate=0.0002,
+        sell_slippage_rate=0.0003,
+        us_sec_fee_per_million=30.0,
+        us_finra_taf_per_share=0.0002,
+        us_finra_taf_cap_per_trade=8.0,
+        us_broker_commission_per_share=0.005,
+        us_broker_min_commission=1.0,
+        us_platform_fee_per_order=0.5,
+    )
+
+    config = _fee_config_from_args(args)
+
+    assert config.market == "US_EQUITY"
+    assert config.us_sec_fee_per_million == 30.0
+    assert config.us_finra_taf_per_share == 0.0002
+    assert config.us_finra_taf_cap_per_trade == 8.0
+    assert config.us_broker_commission_per_share == 0.005
+    assert config.us_broker_min_commission == 1.0
+    assert config.us_platform_fee_per_order == 0.5
 
 
 def test_cli_default_fee_profile_is_costed_not_zero_fee() -> None:
@@ -52,6 +100,32 @@ def test_cli_default_fee_profile_is_costed_not_zero_fee() -> None:
     assert config.buy_commission_rate > 0
     assert config.sell_commission_rate > 0
     assert config.buy_slippage_rate > 0
+
+
+def test_cli_us_yahoo_uses_us_fee_profile_and_rules() -> None:
+    args = SimpleNamespace(
+        fee_profile=None,
+        ignore_fees=False,
+        data_source="us_yahoo",
+        max_t_ratio=0.10,
+        max_single_trade_qty=None,
+        risk_preset="balanced",
+    )
+
+    rules = _rules_config_from_args(args)
+
+    assert _fee_profile_id_from_args(args) == DEFAULT_US_FEE_PROFILE_ID
+    assert _market_source_from_args(args) == "US / Yahoo Finance"
+    assert rules.lot_size == 1
+    assert rules.start_time == "09:30"
+    assert rules.close_time == "16:00"
+    assert rules.price_limit_pct == 1.00
+
+
+def test_cli_position_snapshot_maps_us_market_to_us_yahoo_source() -> None:
+    snapshot = PositionSnapshot(symbol="AAPL", market_source="US / Yahoo Finance")
+
+    assert _data_source_from_snapshot(snapshot) == "us_yahoo"
 
 
 def test_cli_zero_fee_requires_explicit_flag_or_profile() -> None:

@@ -84,6 +84,7 @@ class ModelChangeAuditReport:
     metric_changes: tuple[ModelAuditChange, ...]
     current_thresholds: dict[str, Any]
     current_metrics: dict[str, dict[str, Any]]
+    review_guidance: str
     report_note: str
 
     def as_dict(self) -> dict[str, Any]:
@@ -96,6 +97,7 @@ class ModelChangeAuditReport:
             "metric_changes": [change.as_dict() for change in self.metric_changes],
             "current_thresholds": self.current_thresholds,
             "current_metrics": self.current_metrics,
+            "review_guidance": self.review_guidance,
             "report_note": self.report_note,
         }
 
@@ -186,6 +188,7 @@ def build_model_change_audit_report(
         metric_changes=tuple(metric_changes),
         current_thresholds=current_thresholds,
         current_metrics=current_metrics,
+        review_guidance=_review_guidance(status, threshold_changes, metric_changes, scenario_set_changed),
         report_note=(
             "Model-change audit compares current trigger thresholds and locked-OOS signal metrics against a stored baseline. "
             "Deltas are review prompts only; no profitability claim, realized PnL, or production validity is implied."
@@ -314,6 +317,28 @@ def _summary(
     if scenario_set_changed:
         parts.append("locked-OOS scenario set changed")
     return "Review required: " + "; ".join(parts) + "."
+
+
+def _review_guidance(
+    status: str,
+    threshold_changes: list[ModelAuditChange],
+    metric_changes: list[ModelAuditChange],
+    scenario_set_changed: bool,
+) -> str:
+    if status == "OK":
+        return "Current thresholds and locked-OOS signal metrics match the stored baseline; no baseline update is needed."
+    parts = []
+    if threshold_changes:
+        parts.append(f"{len(threshold_changes)} threshold delta(s)")
+    if metric_changes:
+        parts.append(f"{len(metric_changes)} locked-OOS metric delta(s)")
+    if scenario_set_changed:
+        parts.append("locked-OOS scenario set changed")
+    detail = f" ({', '.join(parts)})" if parts else ""
+    return (
+        f"Current model output differs from the stored locked baseline{detail}. "
+        "Treat this as a human review gate, not as evidence of improvement; update the baseline only through the explicit review-token workflow."
+    )
 
 
 _TRIGGER_ACTIONS = {

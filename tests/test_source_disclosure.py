@@ -22,6 +22,15 @@ def test_yahoo_disclosure_flags_prototype_turnover_and_licensing() -> None:
     assert any("licensed market-data" in item.operator_action for item in disclosure.items)
 
 
+def test_us_yahoo_disclosure_requires_market_mechanics_confirmation() -> None:
+    disclosure = build_data_source_disclosure("US / Yahoo Finance")
+
+    assert disclosure.source_name == "Yahoo Finance public chart feed"
+    assert disclosure.source_grade == "research/prototype feed"
+    assert disclosure.broker_confirmed is False
+    assert {item.topic for item in disclosure.items} >= {"Delay", "Licensing", "Turnover amount", "US market mechanics", "Broker confirmation"}
+
+
 def test_dashboard_source_disclosure_table_has_operator_actions() -> None:
     disclosure = build_data_source_disclosure("A-share / Eastmoney")
 

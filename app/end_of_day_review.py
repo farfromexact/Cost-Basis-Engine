@@ -174,5 +174,7 @@ def _summary(status: str, closeout: SessionCloseoutReport, journals: list[dict[s
     if status == "BLOCKED":
         return base + f" Blocked journals={len(blocked)}; warnings={len(warnings)}; do not count reduction until resolved."
     if status == "WARN":
+        if closeout.status == "WARN":
+            return base + f" Current closeout has warnings; journal warnings={len(warnings)}; review before final signoff."
         return base + f" Warnings={len(warnings)}; review before final signoff."
     return base + " No countable closeout action is active."

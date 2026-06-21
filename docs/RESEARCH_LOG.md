@@ -1,5 +1,101 @@
 # Research Log
 
+## 2026-06-21 - Debug-field alias closeout
+
+Hypothesis: The last in-flight debug-table change should be closed with a naming alias only, not more feature work.
+
+Result: Added `deviation_bps` as a spec-compatible alias for `vwap_deviation_bps` in lifecycle events and signal detail output.
+
+Current interpretation: This is a harmless observability closeout. It does not alter intraday decisions, trigger gates, sizing, or accounting.
+
+## 2026-06-21 - Inventory and sellability top-level decision exposure
+
+Hypothesis: A-share T+1 constraints are important enough that sellable-after, inventory delta, and capital requirement should be visible in the top-level decision, not only in nested diagnostics.
+
+Result: Added top-level inventory fields to `TradeIntent.as_dict()` and added inventory OK / sellable-after / inventory delta / capital-required metrics to the dashboard trading decision card.
+
+Current interpretation: This improves operational transparency. It does not change inventory enforcement, and broker-confirmed holdings are still required before real action.
+
+## 2026-06-21 - Decision-path cost and edge bps exposure
+
+Hypothesis: If the model blocks or allows ENTER based on bps-level round-trip cost and net edge, those exact quantities should be visible in the primary decision path.
+
+Result: Added top-level bps fields to `TradeIntent.as_dict()`, added round-trip cost/net-edge/buffer rows to the decision summary evidence section, and added cost bps/net edge bps metrics to the dashboard top trading decision card.
+
+Current interpretation: This improves interpretability of WATCH versus ENTER. It does not change the trigger logic or evidence boundary.
+
+## 2026-06-21 - Custom fee break-even preview
+
+Hypothesis: Fee configurability is more useful if the operator can immediately see the bps hurdle created by those inputs.
+
+Result: Dashboard custom fee mode now includes a fee preview price and share count, then displays round-trip cost and break-even bps using the market-aware `FeeModel`.
+
+Current interpretation: This makes the cost gate more transparent. It does not alter trigger thresholds, validate broker schedules, route orders, infer fills, or update evaluation baselines.
+
+## 2026-06-21 - Market-specific custom fee plumbing
+
+Hypothesis: Market-aware round-trip gating is incomplete unless the operator can configure the same A-share and US fee fields that the core model uses.
+
+Result: Added CLI arguments for A-share official bps/min-commission fields and US SEC/FINRA/broker/platform fields. Dashboard custom fee mode now preserves the market key and displays the relevant market-specific fields. Focused tests cover custom A-share and US propagation plus existing fee model/profile behavior.
+
+Current interpretation: This improves cost-model configurability and reduces hidden assumptions in live decision support. It does not validate any broker's actual schedule and does not update performance baselines.
+
+## 2026-06-21 - Model-audit review guidance and custom-fee market fix
+
+Hypothesis: A `REVIEW` audit state is useful only if it tells the operator what to do next. The app should clearly separate "current model differs from locked baseline" from "this is an improvement", and should not mutate the baseline automatically.
+
+Result: Added `review_guidance` to model-audit reports and dashboard output. OK reports now state that no baseline update is needed; REVIEW reports now state that drift is a human review gate and baseline updates require the explicit review-token workflow. Also preserved the dashboard custom fee config market key so US custom fees continue using the US fee path.
+
+Current interpretation: This improves governance clarity and fixes market-aware custom fee routing. It does not update the locked baseline, claim improvement, infer fills, or count cost-basis reduction.
+
+## 2026-06-21 - Subtractive intraday execution simplification
+
+Hypothesis: The live layer should not keep adding diagnostic states to the operator-facing workflow. A small state machine plus stricter cost-aware entry gates is more useful than more factors.
+
+Result: Collapsed main lifecycle semantics to `NO_TRADE`, `WATCH`, `ENTER`, `EXIT`, and `ABORT`; filtered the main chart to enter/exit/abort markers; disabled auto-add by default; lowered default max T sizing to 5%; added no-new-pair cutoffs; added A-share official fee components and US SEC/TAF/broker fee components; added unified fee estimation helpers; and made trigger entries require market-aware round-trip cost plus a 5 bps net-edge buffer.
+
+Current interpretation: This is a policy and execution-language simplification. It should reduce false actionability and chart noise, but it also intentionally changes locked-audit metrics versus the previous baseline. The model-audit review state is therefore expected until a human approves a baseline update.
+
+## 2026-06-21 - US/Yahoo market module
+
+Hypothesis: US stock support should be added as an explicit third market route rather than weakening the existing A-share and Korea assumptions.
+
+Result: Added `US / Yahoo Finance` to the dashboard, `--data-source us_yahoo` to CLI trigger paths, a US prototype fee profile, US regular-session rule defaults, US-specific source disclosure, and tests for ticker normalization, rules, fees, caveats, and data quality.
+
+Current interpretation: This is market plumbing and decision-support scaffolding only. Yahoo remains a public prototype feed, turnover amount is still approximated from `close * volume`, and no broker-confirmed US quote, account, fill, FX, or settlement state is modeled.
+
+## 2026-06-21 - Per-session ledger summary
+
+Hypothesis: EOD users need a compact split between realized/countable closeout reduction, blocked non-countable pair cash, and no-action days.
+
+Result: Added `app.session_ledger`, which derives a session ledger from `SessionCloseoutReport`. CLI and dashboard now expose the ledger without changing closeout gates.
+
+Current interpretation: This is an accounting presentation layer. Positive blocked pair cash remains non-countable until closeout gates pass and final signoff is reviewed.
+
+## 2026-06-21 - Broker/manual fill freshness checks
+
+Hypothesis: EOD closeout should not treat old manual fills or old broker export rows as sufficient evidence for the current session. Freshness should be explicit before any final signoff.
+
+Result: Added a `fill_freshness` closeout check that compares manual-fill and broker-export row dates against the session date. The EOD review summary now surfaces closeout WARN status caused by freshness issues.
+
+Current interpretation: This is an audit guard. It can warn that execution evidence is stale, but it does not infer fills, route orders, or make stale rows countable.
+
+## 2026-06-21 - Bounded multi-leg lifecycle state
+
+Hypothesis: Multi-leg T opportunities need explicit bounded-state diagnostics before they can be useful in live replay. A same-side add should require leg-count room, total T position-cap room, minimum spacing, and real price improvement versus the prior leg.
+
+Result: Added lifecycle configuration fields for max legs, total T cap, minimum minutes between legs, and minimum add-leg price improvement. `OpportunityEvent` now reports leg count, cumulative suggested T quantity, cap, add improvement, and minutes since the last leg.
+
+Current interpretation: This is still signal-only lifecycle diagnostics. It can explain why an ADD marker appears or is blocked, but it does not infer orders, fills, realized PnL, or countable cost-basis reduction.
+
+## 2026-06-21 - Soft down-regime B/S gating
+
+Hypothesis: B->S should not use the same regime gate in weak-down, strong-down, and crash-like conditions. Weak-down can be probe-only, while strong-down should require both extreme deviation and strong downside exhaustion; crash-like downside should remain blocked.
+
+Result: Added side-specific trigger-score thresholds, regime trigger multipliers, B->S exhaustion gates, and regime position multipliers. `TriggerEngine` now labels `WEAK_DOWN`, `STRONG_TREND_DOWN`, and `CRASH_DOWN` profiles and sizes weak/strong down B->S probes below the base T size when allowed.
+
+Current interpretation: This is a stricter decision-support policy change. It still does not infer fills, route orders, or claim realized cost-basis reduction.
+
 ## 2026-06-20 - B/S lifecycle diagnostics stage 1
 
 Hypothesis: Before changing sizing and regime gates, the app needs a richer diagnostic language that explains whether a minute is watch-only, probeable, additive, confirmed, close-ready, forced, blocked, or expired.

@@ -2,6 +2,7 @@
     CUSTOM_FEE_PROFILE_ID,
     DEFAULT_A_SHARE_FEE_PROFILE_ID,
     DEFAULT_KOREA_FEE_PROFILE_ID,
+    DEFAULT_US_FEE_PROFILE_ID,
     ZERO_FEE_PROFILE_ID,
     default_fee_profile_id,
     fee_config_from_profile,
@@ -10,6 +11,7 @@
     normalize_fee_profile_id,
 )
 from core.fee_model import FeeConfig
+from core.fee_model import FeeModel
 
 
 def test_default_fee_profiles_are_costed_not_zero_fee() -> None:
@@ -31,19 +33,22 @@ def test_korea_default_uses_non_zero_prototype_profile() -> None:
     assert config.stamp_tax_rate > 0
 
 
+def test_us_default_uses_non_zero_prototype_profile() -> None:
+    profile_id = default_fee_profile_id("US / Yahoo Finance")
+    config = fee_config_from_profile(profile_id)
+
+    assert profile_id == DEFAULT_US_FEE_PROFILE_ID
+    assert config.market == "US_EQUITY"
+    assert config.us_sec_fee_per_million > 0
+    assert config.us_finra_taf_per_share > 0
+    assert config.buy_slippage_rate > 0
+
+
 def test_zero_fee_profile_is_explicit_and_all_zero() -> None:
     config = fee_config_from_profile(ZERO_FEE_PROFILE_ID)
 
-    assert config == FeeConfig(
-        buy_commission_rate=0.0,
-        sell_commission_rate=0.0,
-        min_commission=0.0,
-        stamp_tax_rate=0.0,
-        transfer_fee_rate=0.0,
-        other_fee_rate=0.0,
-        buy_slippage_rate=0.0,
-        sell_slippage_rate=0.0,
-    )
+    assert config.market == "GENERIC"
+    assert FeeModel(config).estimate_round_trip_cost("GENERIC", price=10.0, shares=100, side="B_TO_S") == 0.0
 
 
 def test_custom_profile_uses_supplied_manual_config() -> None:

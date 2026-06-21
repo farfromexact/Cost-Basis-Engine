@@ -24,6 +24,7 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
+from app.ui_text import LANGUAGE_LABELS, SUPPORTED_LANGUAGES, normalize_lang, t
 from app.broker_import import BrokerFillPromotionPreview, BrokerImportReconciliationReport, default_broker_fill_export_path, load_broker_fill_export, reconcile_manual_fills_with_broker_export, supported_broker_fill_columns
 from app.closeout_signoff import CloseoutSignoffPreview, build_closeout_signoff_preview
 from app.end_of_day_review import EndOfDayReviewReport, build_end_of_day_review_report, build_end_of_day_review_table
@@ -54,6 +55,7 @@ from data.yahoo import fetch_yahoo_intraday_bars, normalize_yahoo_symbol
 from app.order_ticket import PreTradeOrderTicket, build_pre_trade_order_ticket
 from app.post_trade_review import PostTradeReviewReport, build_post_trade_review_report
 from app.session_closeout import SessionCloseoutPairAttribution, SessionCloseoutReport, build_session_closeout_report
+from app.session_ledger import SessionLedgerSummary, build_session_ledger_summary
 from app.session_risk import LiveSessionRiskUsageReport, build_live_session_risk_usage_report
 from app.position_state import PositionSnapshot, default_position_state_path, load_position_snapshot, save_position_snapshot
 from app.position_reconciliation import (
@@ -89,45 +91,78 @@ from research.trigger_engine import (
 )
 
 
-ACTION_LABELS = {
-    ActionType.NO_TRADE: "No Trade",
-    ActionType.WATCH_SELL_TO_BUY: "Watch S->B",
-    ActionType.TRIGGER_SELL_TO_BUY: "Trigger S->B",
-    ActionType.WATCH_BUY_TO_SELL: "Watch B->S",
-    ActionType.TRIGGER_BUY_TO_SELL: "Trigger B->S",
-    ActionType.MANAGE_OPEN_PAIR: "Manage Open Pair",
-    ActionType.FORCE_CLOSE_OR_RESTORE: "Force Close/Restore",
+_ACTION_LABEL_KEYS = {
+    ActionType.NO_TRADE: "action.no_trade",
+    ActionType.WATCH_SELL_TO_BUY: "action.watch_sb",
+    ActionType.TRIGGER_SELL_TO_BUY: "action.trigger_sb",
+    ActionType.WATCH_BUY_TO_SELL: "action.watch_bs",
+    ActionType.TRIGGER_BUY_TO_SELL: "action.trigger_bs",
+    ActionType.MANAGE_OPEN_PAIR: "action.manage_pair",
+    ActionType.FORCE_CLOSE_OR_RESTORE: "action.force_close",
 }
 
-REGIME_LABELS = {
-    "MEAN_REVERTING": "Mean Reversion",
-    "TREND_UP": "Trend Up",
-    "TREND_DOWN": "Trend Down",
-    "EVENT_DRIVEN": "Event Driven",
-    "ILLIQUID": "Illiquid",
-    "LIMIT_RISK": "Limit Risk",
-    "LATE_SESSION": "Late Session",
-    "NO_TRADE": "No Trade",
+_REGIME_LABEL_KEYS = {
+    "MEAN_REVERTING": "regime.mean_reverting",
+    "TREND_UP": "regime.trend_up",
+    "TREND_DOWN": "regime.trend_down",
+    "EVENT_DRIVEN": "regime.event_driven",
+    "ILLIQUID": "regime.illiquid",
+    "LIMIT_RISK": "regime.limit_risk",
+    "LATE_SESSION": "regime.late_session",
+    "NO_TRADE": "regime.no_trade",
 }
 
-SIDE_LABELS = {
-    "SELL_TO_BUY": "S->B",
-    "BUY_TO_SELL": "B->S",
-    "NONE": "None",
+_SIDE_LABEL_KEYS = {
+    "SELL_TO_BUY": "side.sb",
+    "BUY_TO_SELL": "side.bs",
+    "NONE": "side.none",
 }
 
 
 _MARKET_A_SHARE = "A-share / Eastmoney"
 _MARKET_KOREA = "Korea / Yahoo Finance"
-_PAGE_INTRADAY = "Intraday trading"
-_PAGE_EXECUTION = "Execution / EOD review"
-_PAGE_RESEARCH = "Research / Audit"
+_MARKET_US = "US / Yahoo Finance"
+_PAGE_INTRADAY = "page.intraday"
+_PAGE_EXECUTION = "page.execution"
+_PAGE_RESEARCH = "page.research"
+_OPEN_PAIR_SIDE_LABELS = {
+    "None": "na",
+    "SB": "side.sb",
+    "BS": "side.bs",
+}
 _REPLAY_TIME_KEY = "intraday_replay_time"
 _PRICE_CHART_WIDGET_VERSION_KEY = "intraday_price_chart_widget_version"
+_UI_LANGUAGE_KEY = "ui_language"
+
+
+def _current_lang() -> str:
+    session_state = getattr(st, "session_state", {})
+    return normalize_lang(session_state.get(_UI_LANGUAGE_KEY) if hasattr(session_state, "get") else None)
+
+
+def _L(key: str, **kwargs) -> str:
+    return t(_current_lang(), key, **kwargs)
+
+
+def _action_label(action_type: ActionType) -> str:
+    return _L(_ACTION_LABEL_KEYS[action_type])
+
+
+def _regime_label(regime_type: str) -> str:
+    return _L(_REGIME_LABEL_KEYS.get(regime_type, "na"))
+
+
+def _side_label(side: str) -> str:
+    return _L(_SIDE_LABEL_KEYS.get(side, "side.none"))
+
+
+def _open_pair_side_label(side: str) -> str:
+    return _L(_OPEN_PAIR_SIDE_LABELS.get(side, "na"))
 
 
 def main() -> None:
-    st.set_page_config(page_title="Cost Basis Engine", page_icon="chart_with_downwards_trend", layout="wide")
+    current_lang = _current_lang()
+    st.set_page_config(page_title=t(current_lang, "page_title"), page_icon="chart_with_downwards_trend", layout="wide")
     st.markdown(
         """
         <style>
@@ -136,99 +171,114 @@ def main() -> None:
         """,
         unsafe_allow_html=True,
     )
-    st.title("Cost Basis Engine")
-    st.caption("Regime -> Deviation -> Inventory -> TradeIntent")
+    st.title(_L("app.title"))
+    st.caption(_L("app.subtitle"))
     state_path = default_position_state_path()
 
     with st.sidebar:
-        st.header("Inputs")
+        selected_lang = st.selectbox(
+            _L("sidebar.language"),
+            options=SUPPORTED_LANGUAGES,
+            index=list(SUPPORTED_LANGUAGES).index(_current_lang()),
+            format_func=lambda value: LANGUAGE_LABELS.get(value, value),
+        )
+        st.session_state[_UI_LANGUAGE_KEY] = selected_lang
+        st.header(_L("sidebar.inputs"))
         persist_position_state = st.checkbox(
-            "Persist position state",
+            _L("sidebar.persist_state"),
             value=False,
-            help="Opt in to load/save sidebar inventory context. Leave off to keep this module idle during reruns.",
+            help=_L("sidebar.persist_state_help"),
         )
         if persist_position_state:
             saved_state = _load_position_state_for_dashboard(state_path)
             default_state = saved_state or PositionSnapshot()
-            st.caption(f"State file: {state_path}")
+            st.caption(_L("state.file", path=state_path))
         else:
             saved_state = None
             default_state = PositionSnapshot()
-            st.caption("Position persistence idle: no state file is loaded or saved during reruns.")
-        market_options = [_MARKET_A_SHARE, _MARKET_KOREA]
+            st.caption(_L("sidebar.state_idle"))
+        market_options = [_MARKET_A_SHARE, _MARKET_KOREA, _MARKET_US]
         saved_market = default_state.market_source if default_state.market_source in market_options else _MARKET_A_SHARE
-        market_source = st.selectbox("Market / data source", market_options, index=market_options.index(saved_market))
-        is_korea = market_source.startswith("Korea")
+        market_source = st.selectbox(_L("sidebar.market_source"), market_options, index=market_options.index(saved_market))
+        is_korea = _is_korea_market(market_source)
+        is_us = _is_us_market(market_source)
         source_matches_saved = default_state.market_source == market_source
-        fallback_symbol = "005930.KS" if is_korea else "603236"
+        fallback_symbol = "005930.KS" if is_korea else ("AAPL" if is_us else "603236")
         default_symbol = default_state.symbol if source_matches_saved and default_state.symbol else fallback_symbol
-        symbol_help = "Examples: 005930.KS, 005935.KS" if is_korea else "Examples: 603236, 000001"
-        qty_step = 1 if is_korea else 100
-        default_held_qty = int(default_state.held_qty) if source_matches_saved else (1000 if is_korea else 151400)
-        default_purchasable_qty = int(default_state.purchasable_qty) if source_matches_saved else (100 if is_korea else 15100)
+        symbol_help = _L("sidebar.symbol_help_kr") if is_korea else (_L("sidebar.symbol_help_us") if is_us else _L("sidebar.symbol_help_cn"))
+        qty_step = _lot_size_for_market(market_source)
+        default_held_qty = int(default_state.held_qty) if source_matches_saved else (1000 if is_korea else (100 if is_us else 151400))
+        default_purchasable_qty = int(default_state.purchasable_qty) if source_matches_saved else (100 if is_korea else (10 if is_us else 15100))
 
-        symbol = st.text_input("Symbol", value=default_symbol, help=symbol_help, key=f"symbol_{'kr' if is_korea else 'cn'}")
-        held_qty = st.number_input("Target / held quantity", min_value=0, value=default_held_qty, step=qty_step)
-        purchasable_qty = st.number_input("Purchasable quantity", min_value=0, value=default_purchasable_qty, step=qty_step)
-        compact_mode = st.checkbox("Compact mode", value=False, help="Show only the main decision and primary chart.")
+        symbol_key = "kr" if is_korea else ("us" if is_us else "cn")
+        symbol = st.text_input(_L("sidebar.symbol"), value=default_symbol, help=symbol_help, key=f"symbol_{symbol_key}")
+        held_qty = st.number_input(_L("sidebar.held_qty"), min_value=0, value=default_held_qty, step=qty_step)
+        purchasable_qty = st.number_input(_L("sidebar.purchasable_qty"), min_value=0, value=default_purchasable_qty, step=qty_step)
+        compact_mode = st.checkbox(_L("sidebar.compact_mode"), value=False, help=_L("sidebar.compact_mode_help"))
         show_chart_markers = st.checkbox(
-            "Show chart signal markers",
+            _L("sidebar.show_chart_markers"),
             value=False,
-            help="Off by default so dense SB/BS markers do not obscure the price chart.",
+            help=_L("sidebar.show_chart_markers_help"),
         )
 
-        with st.expander("Advanced", expanded=False):
+        with st.expander(_L("sidebar.advanced"), expanded=False):
             default_settled_qty = int(default_state.settled_sellable_qty) if source_matches_saved else int(held_qty)
-            default_max_t_ratio = float(default_state.max_t_ratio) if source_matches_saved else 0.10
+            default_max_t_ratio = float(default_state.max_t_ratio) if source_matches_saved else 0.05
             default_max_single_trade_qty = int(default_state.max_single_trade_qty or 0) if source_matches_saved else 0
             default_open_pair_side = default_state.open_pair_side if source_matches_saved and default_state.open_pair_side in {"SB", "BS"} else "None"
             default_open_pair_price = float(default_state.open_pair_price or 0.0) if source_matches_saved else 0.0
             default_open_pair_qty = int(default_state.open_pair_qty or 0) if source_matches_saved else 0
 
-            settled_sellable_qty = st.number_input("Settled sellable quantity", min_value=0, value=default_settled_qty, step=qty_step)
-            max_t_ratio = st.slider("Max single T ratio", min_value=0.01, max_value=0.30, value=default_max_t_ratio, step=0.01)
-            max_single_trade_qty = st.number_input("Max single trade quantity (0 = unlimited)", min_value=0, value=default_max_single_trade_qty, step=qty_step)
+            settled_sellable_qty = st.number_input(_L("sidebar.settled_sellable"), min_value=0, value=default_settled_qty, step=qty_step)
+            max_t_ratio = st.slider(_L("sidebar.max_t_ratio"), min_value=0.01, max_value=0.30, value=default_max_t_ratio, step=0.01)
+            max_single_trade_qty = st.number_input(_L("sidebar.max_single_trade_qty"), min_value=0, value=default_max_single_trade_qty, step=qty_step)
             risk_options = list(risk_limit_preset_ids())
             saved_risk_preset = default_state.risk_limit_preset_id if source_matches_saved else DEFAULT_RISK_LIMIT_PRESET_ID
             if saved_risk_preset not in risk_options:
                 saved_risk_preset = DEFAULT_RISK_LIMIT_PRESET_ID
-            risk_limit_preset_id = st.selectbox("Risk-limit preset", risk_options, index=risk_options.index(saved_risk_preset), format_func=risk_limit_label)
+            risk_limit_preset_id = st.selectbox(_L("sidebar.risk_preset"), risk_options, index=risk_options.index(saved_risk_preset), format_func=risk_limit_label)
             st.caption(risk_limit_description(risk_limit_preset_id))
 
-            st.subheader("Fees and slippage")
+            st.subheader(_L("sidebar.fees"))
             fee_options = fee_profile_choices(market_source)
             default_fee_profile = _dashboard_fee_profile_id(default_state, market_source, source_matches_saved)
             if default_fee_profile not in fee_options:
                 fee_options.append(default_fee_profile)
             fee_profile_id = st.selectbox(
-                "Fee profile",
+                _L("sidebar.fee_profile"),
                 fee_options,
                 index=fee_options.index(default_fee_profile),
                 format_func=fee_profile_label,
-                help="Zero-fee is research-only and must be selected explicitly.",
+                help=_L("sidebar.fee_help"),
             )
-            custom_fee_config = _custom_fee_config_from_sidebar(FeeConfig()) if fee_profile_id == CUSTOM_FEE_PROFILE_ID else None
+            custom_fee_config = _custom_fee_config_from_sidebar(FeeConfig(market=_fee_market_key(market_source))) if fee_profile_id == CUSTOM_FEE_PROFILE_ID else None
             st.caption(fee_profile_description(fee_profile_id))
             if fee_profile_id == ZERO_FEE_PROFILE_ID:
-                st.warning("Zero-fee mode is for mechanics/sensitivity only; do not treat it as live guidance.")
+                st.warning(_L("sidebar.zero_fee_warning"))
             ignore_fees = fee_profile_id == ZERO_FEE_PROFILE_ID
-            marker_cooldown_minutes = st.number_input("Signal marker cooldown minutes", min_value=1, value=10, step=1)
+            marker_cooldown_minutes = st.number_input(_L("sidebar.marker_cooldown"), min_value=1, value=10, step=1)
 
-            st.subheader("Open pair (optional)")
-            open_pair_side = st.selectbox("Open pair side", ["None", "SB", "BS"], index=["None", "SB", "BS"].index(default_open_pair_side))
-            open_pair_price = st.number_input("Open pair first-leg price", min_value=0.0, value=default_open_pair_price, step=0.01)
-            open_pair_qty = st.number_input("Open pair quantity", min_value=0, value=default_open_pair_qty, step=qty_step)
+        st.subheader(_L("sidebar.open_pair"))
+        open_pair_side = st.selectbox(
+            _L("sidebar.open_pair_side"),
+            ["None", "SB", "BS"],
+            index=["None", "SB", "BS"].index(default_open_pair_side),
+            format_func=_open_pair_side_label,
+        )
+        open_pair_price = st.number_input(_L("sidebar.open_pair_price"), min_value=0.0, value=default_open_pair_price, step=0.01)
+        open_pair_qty = st.number_input(_L("sidebar.open_pair_qty"), min_value=0, value=default_open_pair_qty, step=qty_step)
         st.divider()
         dashboard_page = st.radio(
-            "Page",
+            _L("sidebar.page"),
             [_PAGE_INTRADAY, _PAGE_EXECUTION, _PAGE_RESEARCH],
+            format_func=_L,
             index=0,
-            help="Intraday keeps refresh lightweight; execution and research pages load slower workflows only when opened.",
+            help=_L("sidebar.page_help"),
         )
-        auto_refresh = st.checkbox("Auto refresh", value=False)
-        refresh_seconds = st.number_input("Refresh interval seconds", min_value=10, value=60, step=10)
+        auto_refresh = st.checkbox(_L("sidebar.auto_refresh"), value=False)
+        refresh_seconds = st.number_input(_L("sidebar.refresh_interval"), min_value=10, value=60, step=10)
     if not symbol.strip():
-        st.warning("Enter a symbol.")
+        st.warning(_L("sidebar.enter_symbol"))
         return
 
     current_position_state = PositionSnapshot(
@@ -270,7 +320,7 @@ def main() -> None:
             custom_fee_config=custom_fee_config,
         )
     except Exception as exc:
-        st.error(f"Fetch or calculation failed: {type(exc).__name__}: {exc}")
+        st.error(_L("status.fetch_error", error=type(exc).__name__, detail=exc))
         return
 
     market_df = _build_market_frame(bars)
@@ -299,10 +349,10 @@ def main() -> None:
             fee_profile_id=fee_profile_id,
             custom_fee_config=custom_fee_config,
         )
-    st.subheader("Trading decision")
+    st.subheader(_L("panel.trading_decision"))
     _render_intent_compact(display_intent)
     if not compact_mode:
-        _render_decision_summary(build_decision_summary(display_intent))
+        _render_decision_summary(build_decision_summary(display_intent, lang=_current_lang()))
     source_disclosure = build_data_source_disclosure(market_source)
     data_quality_now = display_bars[-1].ts if replay_time is not None else datetime.now()
     data_quality_report = build_data_quality_report(display_bars, market_source=market_source, now=data_quality_now)
@@ -310,8 +360,8 @@ def main() -> None:
     st.caption(_data_caption(market_source, normalized_symbol, display_bars))
     _render_replay_mode_banner(replay_time)
     if dashboard_page == _PAGE_INTRADAY:
-        st.caption("Execution panels and research/audit modules are lazy-loaded on separate pages to keep intraday refreshes light.")
-        st.subheader("Intraday market")
+        st.caption(_L("status.execution_note"))
+        st.subheader(_L("panel.intraday_market"))
         _render_market_ratio_metrics(display_market_df, display_intent)
         display_signal_markers = _scan_signal_markers(
             symbol=normalized_symbol,
@@ -338,16 +388,12 @@ def main() -> None:
             _render_layers(display_intent)
     elif dashboard_page == _PAGE_EXECUTION:
         _render_data_risk_details(source_disclosure, data_quality_report, display_intent)
-        st.subheader("Execution / EOD review")
+        st.subheader(_L("panel.execution_review"))
         st.caption(
-            "This page lazy-loads manual fills, broker reconciliation, execution journal, closeout review, "
-            "post-trade review, live risk usage, and EOD signoff panels."
+            _L("panel.execution_caption")
         )
         if replay_time is not None:
-            st.caption(
-                "Replay-at-time only rewinds market/model state above. Execution/accounting panels remain live/current "
-                "because manual fills, broker imports, journals, and account snapshots are not time-versioned."
-            )
+            st.caption(_L("status.execution_replay_note"))
         manual_fills_path = default_manual_fills_path()
         manual_fills = _load_manual_fills_for_dashboard(manual_fills_path)
         _render_manual_execution_panel(
@@ -402,12 +448,15 @@ def main() -> None:
             broker_reconciliation=broker_reconciliation,
             risk_usage=live_session_risk,
             session_date=bars[-1].ts if bars else None,
+            broker_fills=broker_fills,
         )
+        session_ledger = build_session_ledger_summary(session_closeout)
         _render_pre_trade_order_ticket_panel(ticket)
         _render_execution_sensitivity_panel(sensitivity_report)
         _render_post_trade_review_panel(post_trade_review)
         _render_live_session_risk_usage_panel(live_session_risk)
         _render_session_closeout_panel(session_closeout)
+        _render_session_ledger_panel(session_ledger)
         journal_path = save_execution_journal_report(execution_journal)
         recent_journals = load_execution_journal_records(symbol=execution_journal.symbol, limit=5)
         end_of_day_review = build_end_of_day_review_report(session_closeout, recent_journals)
@@ -512,10 +561,10 @@ def _scan_signal_markers(
 def _signal_marker_row(intent: TradeIntent) -> dict | None:
     action = intent.action_type
     labels = {
-        ActionType.WATCH_SELL_TO_BUY: ("Watch S->B", "Watch", "S->B"),
-        ActionType.TRIGGER_SELL_TO_BUY: ("SB", "Trigger", "S->B"),
-        ActionType.WATCH_BUY_TO_SELL: ("Watch B->S", "Watch", "B->S"),
-        ActionType.TRIGGER_BUY_TO_SELL: ("BS", "Trigger", "B->S"),
+        ActionType.WATCH_SELL_TO_BUY: (_L("action.watch_sb"), _L("chart.level_watch"), _L("side.sb")),
+        ActionType.TRIGGER_SELL_TO_BUY: (_L("action.trigger_sb"), _L("chart.level_trigger"), _L("side.sb")),
+        ActionType.WATCH_BUY_TO_SELL: (_L("action.watch_bs"), _L("chart.level_watch"), _L("side.bs")),
+        ActionType.TRIGGER_BUY_TO_SELL: (_L("action.trigger_bs"), _L("chart.level_trigger"), _L("side.bs")),
     }
     if action not in labels:
         return None
@@ -527,7 +576,7 @@ def _signal_marker_row(intent: TradeIntent) -> dict | None:
         "signal": label,
         "level": level,
         "side": side,
-        "action": ACTION_LABELS[action],
+        "action": _action_label(action),
         "confidence": intent.confidence,
         "suggested_qty": intent.suggested_qty,
         "vwap_deviation_pct": (feature.vwap_deviation * 100) if feature else 0.0,
@@ -539,7 +588,7 @@ def _signal_marker_row(intent: TradeIntent) -> dict | None:
 def _current_intent_marker_row(intent: TradeIntent, market_df: pd.DataFrame) -> dict:
     latest = market_df.iloc[-1]
     feature = intent.feature_snapshot
-    action_label = ACTION_LABELS.get(intent.action_type, intent.action_type.value)
+    action_label = _action_label(intent.action_type)
     reason_parts = list(intent.reasons[:2]) if intent.reasons else []
     if not reason_parts and intent.blockers:
         reason_parts = list(intent.blockers[:2])
@@ -547,27 +596,27 @@ def _current_intent_marker_row(intent: TradeIntent, market_df: pd.DataFrame) -> 
     return {
         "time": pd.to_datetime(intent.timestamp or latest["time"]),
         "price": float(intent.reference_price or latest["close"]),
-        "label": f"Current: {action_label}",
+        "label": _L("chart.current_label", action=action_label),
         "action": action_label,
-        "side": SIDE_LABELS.get(intent.side.value, intent.side.value),
+        "side": _side_label(intent.side.value),
         "confidence": intent.confidence,
         "suggested_qty": intent.suggested_qty,
         "suggested_ratio_pct": intent.suggested_ratio * 100,
         "vwap_deviation_pct": (feature.vwap_deviation * 100) if feature else float(latest["vwap_deviation_pct"]),
         "net_edge": intent.estimated_net_edge,
         "reason": reason,
-        "note": "Current decision from the latest closed minute; no fill or realized PnL is inferred.",
+        "note": _L("chart.current_note"),
     }
 
 
 def _normalize_symbol(market_source: str, symbol: str) -> str:
-    if market_source.startswith("Korea"):
+    if _is_yahoo_market(market_source):
         return normalize_yahoo_symbol(symbol)
     return symbol
 
 
 def _fetch_bars(market_source: str, symbol: str):
-    if market_source.startswith("Korea"):
+    if _is_yahoo_market(market_source):
         return fetch_yahoo_intraday_bars(symbol)
     return fetch_intraday_minute_bars(symbol)
 
@@ -585,14 +634,14 @@ def _save_position_state_for_dashboard(snapshot: PositionSnapshot, path) -> None
     try:
         save_position_snapshot(snapshot, path)
     except OSError as exc:
-        st.sidebar.warning(f"Could not persist position state: {exc}")
+        st.sidebar.warning(_L("sidebar.persist_state_failed", error=exc))
 
 def _build_execution_sensitivity_table(report: ExecutionSensitivityReport) -> pd.DataFrame:
     return pd.DataFrame([band.as_dict() for band in report.bands])
 
 
 def _render_execution_sensitivity_panel(report: ExecutionSensitivityReport) -> None:
-    st.subheader("Execution-quality sensitivity")
+    st.subheader(_L("panel.execution_quality"))
     if report.status == "OK":
         st.success(report.summary)
     elif report.status == "WARN":
@@ -602,23 +651,23 @@ def _render_execution_sensitivity_panel(report: ExecutionSensitivityReport) -> N
     else:
         st.info(report.summary)
     cols = st.columns(4)
-    cols[0].metric("Baseline net edge", f"{report.baseline_net_edge:.2f}")
-    cols[1].metric("Worst stressed edge", f"{report.worst_net_edge:.2f}")
-    cols[2].metric("Side", report.side)
-    cols[3].metric("Qty", f"{report.qty}")
+    cols[0].metric(_L("execution.baseline_net_edge"), f"{report.baseline_net_edge:.2f}")
+    cols[1].metric(_L("execution.worst_stressed_edge"), f"{report.worst_net_edge:.2f}")
+    cols[2].metric(_L("panel.side"), report.side)
+    cols[3].metric(_L("execution.qty"), f"{report.qty}")
     table = _build_execution_sensitivity_table(report)
     if table.empty:
-        st.caption("No actionable first-leg ticket is active, so no slippage sensitivity is shown.")
+        st.caption(_L("execution.no_sensitivity_data"))
     else:
         st.dataframe(table, hide_index=True, width="stretch")
-        st.caption("Bands stress the trigger-engine gross edge against higher slippage and adverse fill bps; no execution or fill is inferred.")
+        st.caption(_L("execution.sensitivity_caption"))
 
 def _build_pre_trade_order_ticket_table(ticket: PreTradeOrderTicket) -> pd.DataFrame:
     return pd.DataFrame([check.as_dict() for check in ticket.checks])
 
 
 def _render_pre_trade_order_ticket_panel(ticket: PreTradeOrderTicket) -> None:
-    st.subheader("Pre-trade order ticket checklist")
+    st.subheader(_L("panel.pre_trade_checklist"))
     if ticket.status == "OK":
         st.success(ticket.summary)
     elif ticket.status == "WARN":
@@ -628,12 +677,12 @@ def _render_pre_trade_order_ticket_panel(ticket: PreTradeOrderTicket) -> None:
     else:
         st.info(ticket.summary)
     cols = st.columns(4)
-    cols[0].metric("Side", ticket.side)
-    cols[1].metric("Qty", f"{ticket.qty}")
-    cols[2].metric("Limit/ref price", f"{ticket.limit_price:.4f}")
-    cols[3].metric("Cash required", f"{ticket.cash_required:.2f}")
+    cols[0].metric(_L("panel.side"), ticket.side)
+    cols[1].metric(_L("execution.qty"), f"{ticket.qty}")
+    cols[2].metric(_L("execution.limit_ref_price"), f"{ticket.limit_price:.4f}")
+    cols[3].metric(_L("execution.cash_required"), f"{ticket.cash_required:.2f}")
     st.dataframe(_build_pre_trade_order_ticket_table(ticket), hide_index=True, width="stretch")
-    st.caption("Checklist only: confirm broker preview, price band, available holdings/cash, and fees before submitting any order.")
+    st.caption(_L("execution.pre_trade_caption"))
 
 def _build_execution_journal_table(report: ExecutionJournalReport) -> pd.DataFrame:
     return pd.DataFrame([item.as_dict() for item in report.items])
@@ -641,7 +690,7 @@ def _build_execution_journal_table(report: ExecutionJournalReport) -> pd.DataFra
 
 
 def _render_execution_journal_panel(report: ExecutionJournalReport, journal_path=None, recent_journals=None) -> None:
-    st.subheader("Session execution journal")
+    st.subheader(_L("panel.execution_journal"))
     if report.status == "OK":
         st.success(report.summary)
     elif report.status == "BLOCKED":
@@ -649,17 +698,17 @@ def _render_execution_journal_panel(report: ExecutionJournalReport, journal_path
     else:
         st.warning(report.summary)
     cols = st.columns(4)
-    cols[0].metric("Action", report.action_type)
-    cols[1].metric("Manual fills", f"{report.manual_fill_count}")
-    cols[2].metric("Broker matches", f"{report.broker_matched_count}")
-    cols[3].metric("Journal status", report.status)
+    cols[0].metric(_L("journal.action"), report.action_type)
+    cols[1].metric(_L("journal.manual_fills"), f"{report.manual_fill_count}")
+    cols[2].metric(_L("journal.broker_matches"), f"{report.broker_matched_count}")
+    cols[3].metric(_L("journal.status"), report.status)
     st.dataframe(_build_execution_journal_table(report), hide_index=True, width="stretch")
     if journal_path:
-        st.caption(f"Persisted journal: {journal_path}")
+        st.caption(_L("journal.persisted_path", path=journal_path))
     history = build_execution_journal_history_table(recent_journals or [])
     if history:
         st.dataframe(pd.DataFrame(history), hide_index=True, width="stretch")
-    st.caption("Journal links existing artifacts for audit only; it does not route orders, infer fills, or update accounting.")
+    st.caption(_L("journal.caption"))
 
 
 
@@ -674,10 +723,10 @@ def _build_broker_fill_promotion_preview_table(preview: BrokerFillPromotionPrevi
 
 
 def _render_broker_import_reconciliation_panel(symbol: str, manual_fills, path) -> None:
-    st.subheader("Broker fill import reconciliation")
-    st.caption("Optional scaffold: place a broker-confirmed CSV/JSON export at the configured path to reconcile it against manual fills.")
+    st.subheader(_L("panel.broker_import"))
+    st.caption(_L("broker_import.caption"))
     if not path.exists():
-        st.info(f"No broker export found at {path}. Supported columns: {', '.join(supported_broker_fill_columns())}.")
+        st.info(_L("broker_import.missing_export", path=path, cols=", ".join(supported_broker_fill_columns())))
         return
     try:
         broker_fills = load_broker_fill_export(path)
@@ -692,14 +741,14 @@ def _render_broker_import_reconciliation_panel(symbol: str, manual_fills, path) 
     else:
         st.warning(report.summary)
     cols = st.columns(4)
-    cols[0].metric("Matched", f"{report.matched_count}")
-    cols[1].metric("Broker-only", f"{report.broker_only_count}")
-    cols[2].metric("Manual-only", f"{report.manual_only_count}")
-    cols[3].metric("Ambiguous", f"{report.ambiguous_count}")
+    cols[0].metric(_L("broker_import.matched"), f"{report.matched_count}")
+    cols[1].metric(_L("broker_import.broker_only"), f"{report.broker_only_count}")
+    cols[2].metric(_L("broker_import.manual_only"), f"{report.manual_only_count}")
+    cols[3].metric(_L("broker_import.ambiguous"), f"{report.ambiguous_count}")
     table = _build_broker_import_reconciliation_table(report)
     if not table.empty:
         st.dataframe(table, hide_index=True, width="stretch")
-    st.caption("Broker exports are reconciliation evidence only; rows are not automatically imported as manual fills.")
+    st.caption(_L("broker_import.caption_evidence"))
 
 
 
@@ -717,6 +766,10 @@ def _build_session_closeout_pair_table(report: SessionCloseoutReport) -> pd.Data
     return pd.DataFrame([pair.as_dict() for pair in report.pair_attributions])
 
 
+def _build_session_ledger_table(summary: SessionLedgerSummary) -> pd.DataFrame:
+    return pd.DataFrame([row.as_dict() for row in summary.rows])
+
+
 
 def _build_end_of_day_review_table(report: EndOfDayReviewReport) -> pd.DataFrame:
     return pd.DataFrame(build_end_of_day_review_table(report))
@@ -729,7 +782,7 @@ def _build_closeout_signoff_preview_table(preview: CloseoutSignoffPreview) -> pd
 
 
 def _render_closeout_signoff_panel(preview: CloseoutSignoffPreview) -> None:
-    st.subheader("Reviewed closeout signoff export")
+    st.subheader(_L("panel.closeout_signoff"))
     if preview.status == "READY":
         st.success(preview.summary)
     elif preview.status == "BLOCKED":
@@ -739,14 +792,14 @@ def _render_closeout_signoff_panel(preview: CloseoutSignoffPreview) -> None:
     else:
         st.info(preview.summary)
     cols = st.columns(4)
-    cols[0].metric("Closeout", preview.closeout_status)
-    cols[1].metric("Countable", "YES" if preview.closeout_countable else "NO")
-    cols[2].metric("Reduction", f"{preview.countable_cost_basis_reduction:.2f}")
-    cols[3].metric("Export", preview.status)
+    cols[0].metric(_L("panel.closeout_status"), preview.closeout_status)
+    cols[1].metric(_L("panel.countable"), _L("yes") if preview.closeout_countable else _L("no"))
+    cols[2].metric(_L("execution.reduction"), f"{preview.countable_cost_basis_reduction:.2f}")
+    cols[3].metric(_L("panel.export"), preview.status)
     st.dataframe(_build_closeout_signoff_preview_table(preview), hide_index=True, width="stretch")
-    st.caption(f"CLI export path: {preview.signoff_path}. {preview.capability_note}")
+    st.caption(_L("closeout.signoff_caption", path=preview.signoff_path, note=preview.capability_note))
 def _render_end_of_day_review_panel(report: EndOfDayReviewReport) -> None:
-    st.subheader("Compact end-of-day review")
+    st.subheader(_L("panel.eod_review"))
     if report.status == "OK":
         st.success(report.summary)
     elif report.status == "BLOCKED":
@@ -756,17 +809,17 @@ def _render_end_of_day_review_panel(report: EndOfDayReviewReport) -> None:
     else:
         st.info(report.summary)
     cols = st.columns(4)
-    cols[0].metric("Closeout", report.closeout_status)
-    cols[1].metric("Recent journals", f"{report.recent_journal_count}")
-    cols[2].metric("Blocked journals", f"{report.blocked_journal_count}")
-    cols[3].metric("Countable", "YES" if report.closeout_countable else "NO")
+    cols[0].metric(_L("panel.closeout_status"), report.closeout_status)
+    cols[1].metric(_L("eod.recent_journals"), f"{report.recent_journal_count}")
+    cols[2].metric(_L("eod.blocked_journals"), f"{report.blocked_journal_count}")
+    cols[3].metric(_L("panel.countable"), _L("yes") if report.closeout_countable else _L("no"))
     st.dataframe(_build_end_of_day_review_table(report), hide_index=True, width="stretch")
-    st.caption("Compact review compares current closeout with recent persisted journals; closeout gates remain authoritative.")
+    st.caption(_L("eod.caption"))
 
 
 
 def _render_session_closeout_panel(report: SessionCloseoutReport) -> None:
-    st.subheader("End-of-day session closeout")
+    st.subheader(_L("panel.session_closeout"))
     if report.status == "OK":
         st.success(report.summary)
     elif report.status == "BLOCKED":
@@ -776,20 +829,41 @@ def _render_session_closeout_panel(report: SessionCloseoutReport) -> None:
     else:
         st.info(report.summary)
     cols = st.columns(4)
-    cols[0].metric("Closed pairs", f"{report.closed_pair_count}")
-    cols[1].metric("Open pairs", f"{report.open_pair_count}")
-    cols[2].metric("Net qty delta", f"{report.net_position_delta_qty}")
-    cols[3].metric("Countable reduction", f"{report.countable_cost_basis_reduction:.2f}")
+    cols[0].metric(_L("closeout.closed_pairs"), f"{report.closed_pair_count}")
+    cols[1].metric(_L("closeout.open_pairs"), f"{report.open_pair_count}")
+    cols[2].metric(_L("closeout.net_qty_delta"), f"{report.net_position_delta_qty}")
+    cols[3].metric(_L("execution.reduction"), f"{report.countable_cost_basis_reduction:.2f}")
     st.dataframe(_build_session_closeout_table(report), hide_index=True, width="stretch")
     pair_table = _build_session_closeout_pair_table(report)
     if not pair_table.empty:
         st.dataframe(pair_table, hide_index=True, width="stretch")
-    st.caption("Closeout gates cost-basis accounting: broker reconciliation, restored inventory, no open risk breach, and fees/slippage deducted.")
+    st.caption(_L("closeout.caption"))
+
+
+def _render_session_ledger_panel(summary: SessionLedgerSummary) -> None:
+    st.subheader(_L("panel.session_ledger"))
+    if summary.status == "OK":
+        st.success(summary.summary)
+    elif summary.status == "BLOCKED":
+        st.error(summary.summary)
+    elif summary.status == "WARN":
+        st.warning(summary.summary)
+    else:
+        st.info(summary.summary)
+    cols = st.columns(4)
+    cols[0].metric(_L("ledger.realized_countable"), f"{summary.realized_countable_reduction:.2f}")
+    cols[1].metric(_L("ledger.blocked_pair_cash"), f"{summary.blocked_pair_net_cash:.2f}")
+    cols[2].metric(_L("ledger.countable_pairs"), f"{summary.countable_pair_count}")
+    cols[3].metric(_L("ledger.no_action_day"), _L("yes") if summary.no_action_day else _L("no"))
+    table = _build_session_ledger_table(summary)
+    if not table.empty:
+        st.dataframe(table, hide_index=True, width="stretch")
+    st.caption(_L("ledger.caption"))
 
 
 
 def _render_live_session_risk_usage_panel(report: LiveSessionRiskUsageReport) -> None:
-    st.subheader("Live-session risk usage")
+    st.subheader(_L("panel.risk_usage"))
     if report.status == "OK":
         st.success(report.summary)
     elif report.status == "BLOCKED":
@@ -797,12 +871,12 @@ def _render_live_session_risk_usage_panel(report: LiveSessionRiskUsageReport) ->
     else:
         st.warning(report.summary)
     cols = st.columns(4)
-    cols[0].metric("Manual fills", f"{report.manual_fill_count}")
-    cols[1].metric("Turnover qty", f"{report.gross_turnover_qty}")
-    cols[2].metric("Open exposure", f"{report.open_pair_notional:.2f}")
-    cols[3].metric("Max open age", f"{report.max_open_pair_age_minutes:.1f}m")
+    cols[0].metric(_L("journal.manual_fills"), f"{report.manual_fill_count}")
+    cols[1].metric(_L("risk.gross_turnover_qty"), f"{report.gross_turnover_qty}")
+    cols[2].metric(_L("risk.open_exposure"), f"{report.open_pair_notional:.2f}")
+    cols[3].metric(_L("risk.max_open_age"), f"{report.max_open_pair_age_minutes:.1f}m")
     st.dataframe(_build_live_session_risk_usage_table(report), hide_index=True, width="stretch")
-    st.caption("Usage is counted from manual broker fills only. Preset limits are guardrails, not performance evidence.")
+    st.caption(_L("risk.caption"))
 
 
 
@@ -812,7 +886,7 @@ def _build_post_trade_review_table(report: PostTradeReviewReport) -> pd.DataFram
 
 
 def _render_post_trade_review_panel(report: PostTradeReviewReport) -> None:
-    st.subheader("Post-trade review")
+    st.subheader(_L("panel.post_trade_review"))
     if report.status == "OK":
         st.success(report.summary)
     elif report.status == "BLOCKED":
@@ -822,12 +896,12 @@ def _render_post_trade_review_panel(report: PostTradeReviewReport) -> None:
     else:
         st.warning(report.summary)
     cols = st.columns(4)
-    cols[0].metric("Fill qty", f"{report.fill_qty}/{report.expected_qty}")
-    cols[1].metric("Avg fill", f"{report.fill_avg_price:.4f}")
-    cols[2].metric("Ticket price diff", f"{report.price_diff_vs_ticket:.4f}")
-    cols[3].metric("Worst stressed edge", f"{report.worst_sensitivity_net_edge:.2f}")
+    cols[0].metric(_L("execution.fill_qty"), f"{report.fill_qty}/{report.expected_qty}")
+    cols[1].metric(_L("post_trade.avg_fill"), f"{report.fill_avg_price:.4f}")
+    cols[2].metric(_L("post_trade.ticket_price_diff"), f"{report.price_diff_vs_ticket:.4f}")
+    cols[3].metric(_L("execution.worst_stressed_edge"), f"{report.worst_sensitivity_net_edge:.2f}")
     st.dataframe(_build_post_trade_review_table(report), hide_index=True, width="stretch")
-    st.caption("Manual broker fills only: no order routing, no inferred fills, and no cost-basis reduction until both legs close, target inventory is restored, and fees/slippage are deducted.")
+    st.caption(_L("post_trade.caption"))
 
 
 
@@ -848,8 +922,8 @@ def _render_position_reconciliation_panel(
     broker_snapshot: BrokerPositionSnapshot | None,
     path,
 ) -> None:
-    st.subheader("Broker position reconciliation")
-    st.caption("Persisted sidebar state is not brokerage truth. Record the current broker/account snapshot before relying on sizing.")
+    st.subheader(_L("panel.position_reconciliation"))
+    st.caption(_L("position_recon.caption"))
     report = reconcile_position_state(persisted, broker_snapshot)
     if report.status == "OK":
         st.success(report.summary)
@@ -858,19 +932,19 @@ def _render_position_reconciliation_panel(
     else:
         st.warning(report.summary)
     st.dataframe(_build_position_reconciliation_table(report), hide_index=True, width="stretch")
-    st.caption(f"Reconciliation file: {path}")
+    st.caption(_L("position_recon.path", path=path))
 
     with st.form("broker_position_reconciliation_form"):
-        st.write("Record broker/manual position snapshot")
-        broker_market_source = st.text_input("Broker market/source", value=persisted.market_source)
-        broker_symbol = st.text_input("Broker symbol", value=persisted.symbol)
-        total_qty = st.number_input("Broker total quantity", min_value=0, value=int(persisted.held_qty), step=1)
-        sellable_qty = st.number_input("Broker sellable quantity", min_value=0, value=int(persisted.settled_sellable_qty), step=1)
-        purchasable_qty = st.number_input("Broker purchasable quantity", min_value=0, value=int(persisted.purchasable_qty), step=1)
-        cash_available = st.number_input("Broker cash available", min_value=0.0, value=0.0, step=100.0)
-        as_of = st.text_input("Broker snapshot time", value=datetime.now().isoformat(timespec="seconds"))
-        note = st.text_input("Reconciliation note", value="Manual broker/account screen check.")
-        submitted = st.form_submit_button("Record broker snapshot")
+        st.write(_L("position_recon.form_title"))
+        broker_market_source = st.text_input(_L("position_recon.market_source"), value=persisted.market_source)
+        broker_symbol = st.text_input(_L("position_recon.symbol"), value=persisted.symbol)
+        total_qty = st.number_input(_L("position_recon.total_qty"), min_value=0, value=int(persisted.held_qty), step=1)
+        sellable_qty = st.number_input(_L("position_recon.sellable_qty"), min_value=0, value=int(persisted.settled_sellable_qty), step=1)
+        purchasable_qty = st.number_input(_L("position_recon.purchasable_qty"), min_value=0, value=int(persisted.purchasable_qty), step=1)
+        cash_available = st.number_input(_L("position_recon.cash_available"), min_value=0.0, value=0.0, step=100.0)
+        as_of = st.text_input(_L("position_recon.as_of"), value=datetime.now().isoformat(timespec="seconds"))
+        note = st.text_input(_L("position_recon.note"), value=_L("position_recon.default_note"))
+        submitted = st.form_submit_button(_L("position_recon.submit"))
     if submitted:
         snapshot = BrokerPositionSnapshot(
             market_source=broker_market_source,
@@ -884,7 +958,7 @@ def _render_position_reconciliation_panel(
         )
         try:
             save_broker_position_snapshot(snapshot, path)
-            st.success("Recorded broker snapshot. Refresh to update reconciliation status.")
+            st.success(_L("position_recon.saved"))
         except (OSError, ValueError) as exc:
             st.warning(str(exc))
 
@@ -905,27 +979,27 @@ def _render_manual_execution_panel(
     fills,
     path,
 ) -> None:
-    st.subheader("Manual execution checklist")
-    st.caption("Signals and lifecycle markers are decision support only. Record actual broker fills here before treating a pair as closed.")
+    st.subheader(_L("panel.manual_execution"))
+    st.caption(_L("manual.caption_intro"))
     checklist = build_execution_checklist(symbol, open_pair_side, open_pair_price, open_pair_qty, fills)
     st.dataframe(pd.DataFrame([item.as_dict() for item in checklist.items]), hide_index=True, width="stretch")
-    st.caption(f"Pair id: {checklist.pair_id}; status: {checklist.status}; fill file: {path}")
+    st.caption(_L("manual.pair_info", pair_id=checklist.pair_id, status=checklist.status, path=path))
     if not open_pair_side:
         return
 
     next_side = expected_next_fill_side(open_pair_side, fills, checklist.pair_id)
     if next_side is None:
-        st.success("Both manual legs have been recorded for this pair. Verify inventory and broker fees before claiming cost-basis reduction.")
+        st.success(_L("manual.both_legs_recorded"))
         return
 
     with st.form("manual_fill_record_form"):
-        st.write(f"Record manual {next_side.value} fill for {checklist.pair_id}")
-        fill_qty = st.number_input("Fill quantity", min_value=1, value=max(1, int(open_pair_qty or 1)), step=1)
-        fill_price = st.number_input("Fill price", min_value=0.01, value=float(latest_price or open_pair_price or 0.01), step=0.01)
-        fees = st.number_input("Broker fees", min_value=0.0, value=0.0, step=0.01)
-        slippage = st.number_input("Slippage / price impact", min_value=0.0, value=0.0, step=0.01)
-        note = st.text_input("Manual fill note", value="Manual fill recorded from broker/order screen.")
-        submitted = st.form_submit_button("Record manual fill")
+        st.write(_L("manual.record_fill_for_pair", side=next_side.value, pair_id=checklist.pair_id))
+        fill_qty = st.number_input(_L("manual.fill_qty"), min_value=1, value=max(1, int(open_pair_qty or 1)), step=1)
+        fill_price = st.number_input(_L("manual.fill_price"), min_value=0.01, value=float(latest_price or open_pair_price or 0.01), step=0.01)
+        fees = st.number_input(_L("manual.broker_fees"), min_value=0.0, value=0.0, step=0.01)
+        slippage = st.number_input(_L("manual.slippage"), min_value=0.0, value=0.0, step=0.01)
+        note = st.text_input(_L("manual.fill_note"), value=_L("manual.fill_note_default"))
+        submitted = st.form_submit_button(_L("manual.submit"))
     if submitted:
         fill = make_manual_fill(
             symbol=symbol,
@@ -939,7 +1013,7 @@ def _render_manual_execution_panel(
         )
         try:
             record_manual_fill(fill, path)
-            st.success(f"Recorded manual {fill.side.value} fill. Refresh to update checklist.")
+            st.success(_L("manual.recorded_fill", side=fill.side.value))
         except ValueError as exc:
             st.warning(str(exc))
 
@@ -970,15 +1044,46 @@ def _dashboard_fee_profile_id(snapshot: PositionSnapshot, market_source: str, so
 
 def _custom_fee_config_from_sidebar(default: FeeConfig) -> FeeConfig:
     c1, c2 = st.columns(2)
-    buy_commission_rate = c1.number_input("Buy commission rate", min_value=0.0, value=float(default.buy_commission_rate), step=0.00001, format="%.5f")
-    sell_commission_rate = c2.number_input("Sell commission rate", min_value=0.0, value=float(default.sell_commission_rate), step=0.00001, format="%.5f")
-    min_commission = c1.number_input("Minimum commission", min_value=0.0, value=float(default.min_commission), step=0.5)
-    stamp_tax_rate = c2.number_input("Sell stamp/tax rate", min_value=0.0, value=float(default.stamp_tax_rate), step=0.0001, format="%.5f")
-    transfer_fee_rate = c1.number_input("Transfer fee rate", min_value=0.0, value=float(default.transfer_fee_rate), step=0.00001, format="%.5f")
-    other_fee_rate = c2.number_input("Other fee rate", min_value=0.0, value=float(default.other_fee_rate), step=0.00001, format="%.5f")
-    buy_slippage_rate = c1.number_input("Buy slippage rate", min_value=0.0, value=float(default.buy_slippage_rate), step=0.00001, format="%.5f")
-    sell_slippage_rate = c2.number_input("Sell slippage rate", min_value=0.0, value=float(default.sell_slippage_rate), step=0.00001, format="%.5f")
-    return FeeConfig(
+    buy_commission_rate = c1.number_input(_L("fees.buy_commission_rate"), min_value=0.0, value=float(default.buy_commission_rate), step=0.00001, format="%.5f")
+    sell_commission_rate = c2.number_input(_L("fees.sell_commission_rate"), min_value=0.0, value=float(default.sell_commission_rate), step=0.00001, format="%.5f")
+    min_commission = c1.number_input(_L("fees.minimum_commission"), min_value=0.0, value=float(default.min_commission), step=0.5)
+    stamp_tax_rate = c2.number_input(_L("fees.stamp_tax_rate"), min_value=0.0, value=float(default.stamp_tax_rate), step=0.0001, format="%.5f")
+    transfer_fee_rate = c1.number_input(_L("fees.transfer_fee_rate"), min_value=0.0, value=float(default.transfer_fee_rate), step=0.00001, format="%.5f")
+    other_fee_rate = c2.number_input(_L("fees.other_fee_rate"), min_value=0.0, value=float(default.other_fee_rate), step=0.00001, format="%.5f")
+    buy_slippage_rate = c1.number_input(_L("fees.buy_slippage_rate"), min_value=0.0, value=float(default.buy_slippage_rate), step=0.00001, format="%.5f")
+    sell_slippage_rate = c2.number_input(_L("fees.sell_slippage_rate"), min_value=0.0, value=float(default.sell_slippage_rate), step=0.00001, format="%.5f")
+    a_share_handling_fee_bps = default.a_share_handling_fee_bps
+    a_share_management_fee_bps = default.a_share_management_fee_bps
+    a_share_transfer_fee_bps = default.a_share_transfer_fee_bps
+    a_share_stamp_duty_sell_bps = default.a_share_stamp_duty_sell_bps
+    a_share_broker_commission_bps = default.a_share_broker_commission_bps
+    a_share_min_commission_cny = default.a_share_min_commission_cny
+    us_sec_fee_per_million = default.us_sec_fee_per_million
+    us_finra_taf_per_share = default.us_finra_taf_per_share
+    us_finra_taf_cap_per_trade = default.us_finra_taf_cap_per_trade
+    us_broker_commission_per_share = default.us_broker_commission_per_share
+    us_broker_min_commission = default.us_broker_min_commission
+    us_platform_fee_per_order = default.us_platform_fee_per_order
+    if default.market == "A_SHARE":
+        a_share_handling_fee_bps = c1.number_input(_L("fees.a_share_handling_fee_bps"), min_value=0.0, value=float(default.a_share_handling_fee_bps), step=0.001, format="%.3f")
+        a_share_management_fee_bps = c2.number_input(_L("fees.a_share_management_fee_bps"), min_value=0.0, value=float(default.a_share_management_fee_bps), step=0.001, format="%.3f")
+        a_share_transfer_fee_bps = c1.number_input(_L("fees.a_share_transfer_fee_bps"), min_value=0.0, value=float(default.a_share_transfer_fee_bps), step=0.001, format="%.3f")
+        a_share_stamp_duty_sell_bps = c2.number_input(_L("fees.a_share_stamp_duty_sell_bps"), min_value=0.0, value=float(default.a_share_stamp_duty_sell_bps), step=0.001, format="%.3f")
+        a_share_broker_commission_bps = c1.number_input(_L("fees.a_share_broker_commission_bps"), min_value=0.0, value=float(default.a_share_broker_commission_bps), step=0.001, format="%.3f")
+        a_share_min_commission_cny = c2.number_input(_L("fees.a_share_min_commission_cny"), min_value=0.0, value=float(default.a_share_min_commission_cny), step=0.5)
+    elif default.market == "US_EQUITY":
+        us_sec_fee_per_million = c1.number_input(_L("fees.us_sec_fee_per_million"), min_value=0.0, value=float(default.us_sec_fee_per_million), step=0.1)
+        us_finra_taf_per_share = c2.number_input(_L("fees.us_finra_taf_per_share"), min_value=0.0, value=float(default.us_finra_taf_per_share), step=0.000001, format="%.6f")
+        us_finra_taf_cap_per_trade = c1.number_input(_L("fees.us_finra_taf_cap_per_trade"), min_value=0.0, value=float(default.us_finra_taf_cap_per_trade), step=0.01)
+        us_broker_commission_per_share = c2.number_input(_L("fees.us_broker_commission_per_share"), min_value=0.0, value=float(default.us_broker_commission_per_share), step=0.0001, format="%.4f")
+        us_broker_min_commission = c1.number_input(_L("fees.us_broker_min_commission"), min_value=0.0, value=float(default.us_broker_min_commission), step=0.01)
+        us_platform_fee_per_order = c2.number_input(_L("fees.us_platform_fee_per_order"), min_value=0.0, value=float(default.us_platform_fee_per_order), step=0.01)
+    preview_price_default = 100.0 if default.market == "US_EQUITY" else 10.0
+    preview_shares_default = 100 if default.market == "US_EQUITY" else 10_000
+    preview_price = c1.number_input(_L("fees.preview_price"), min_value=0.01, value=float(preview_price_default), step=0.01)
+    preview_shares = c2.number_input(_L("fees.preview_shares"), min_value=1, value=int(preview_shares_default), step=1)
+    config = FeeConfig(
+        market=default.market,
         buy_commission_rate=buy_commission_rate,
         sell_commission_rate=sell_commission_rate,
         min_commission=min_commission,
@@ -987,6 +1092,38 @@ def _custom_fee_config_from_sidebar(default: FeeConfig) -> FeeConfig:
         other_fee_rate=other_fee_rate,
         buy_slippage_rate=buy_slippage_rate,
         sell_slippage_rate=sell_slippage_rate,
+        a_share_handling_fee_bps=a_share_handling_fee_bps,
+        a_share_management_fee_bps=a_share_management_fee_bps,
+        a_share_transfer_fee_bps=a_share_transfer_fee_bps,
+        a_share_stamp_duty_sell_bps=a_share_stamp_duty_sell_bps,
+        a_share_broker_commission_bps=a_share_broker_commission_bps,
+        a_share_min_commission_cny=a_share_min_commission_cny,
+        us_sec_fee_per_million=us_sec_fee_per_million,
+        us_finra_taf_per_share=us_finra_taf_per_share,
+        us_finra_taf_cap_per_trade=us_finra_taf_cap_per_trade,
+        us_broker_commission_per_share=us_broker_commission_per_share,
+        us_broker_min_commission=us_broker_min_commission,
+        us_platform_fee_per_order=us_platform_fee_per_order,
+    )
+    _render_custom_fee_break_even_preview(config, float(preview_price), int(preview_shares))
+    return config
+
+
+def _render_custom_fee_break_even_preview(config: FeeConfig, preview_price: float, preview_shares: int) -> None:
+    try:
+        round_trip_cost = FeeModel(config).estimate_round_trip_cost(config.market, preview_price, preview_shares, "B_TO_S")
+        break_even_bps = FeeModel(config).estimate_break_even_bps(config.market, preview_price, preview_shares, "B_TO_S")
+    except ValueError:
+        return
+    st.caption(
+        _L(
+            "fees.break_even_preview",
+            market=config.market,
+            shares=preview_shares,
+            price=preview_price,
+            cost=round_trip_cost,
+            bps=break_even_bps,
+        )
     )
 
 
@@ -1019,15 +1156,16 @@ def _build_model_audit_change_table(report: ModelChangeAuditReport) -> pd.DataFr
 
 
 def _render_model_change_audit_report(report: ModelChangeAuditReport) -> None:
-    st.subheader("Model-change audit")
+    st.subheader(_L("panel.model_audit"))
     if report.status == "OK":
         st.success(report.summary)
     else:
         st.warning(report.summary)
+        st.caption(report.review_guidance)
     cols = st.columns(3)
-    cols[0].metric("Audit status", report.status)
-    cols[1].metric("Locked OOS rows", f"{report.locked_oos_count}")
-    cols[2].metric("Changes", f"{len(report.threshold_changes) + len(report.metric_changes)}")
+    cols[0].metric(_L("model_audit.status"), report.status)
+    cols[1].metric(_L("model_audit.locked_oos"), f"{report.locked_oos_count}")
+    cols[2].metric(_L("model_audit.changes"), f"{len(report.threshold_changes) + len(report.metric_changes)}")
     st.dataframe(_build_model_audit_change_table(report), hide_index=True, width="stretch")
     st.caption(report.report_note)
 
@@ -1049,19 +1187,19 @@ def _build_model_audit_baseline_update_table(preview: ModelAuditBaselineUpdatePr
 
 
 def _render_model_audit_baseline_update_panel(preview: ModelAuditBaselineUpdatePreview) -> None:
-    st.subheader("Audit baseline update review")
+    st.subheader(_L("panel.baseline_update"))
     if preview.status == "NO_UPDATE_NEEDED":
-        st.info("No baseline update is needed because the canonical audit matches the stored baseline.")
+        st.info(_L("model_audit.no_update_needed"))
     else:
         st.warning(preview.audit_summary)
     st.dataframe(_build_model_audit_baseline_update_table(preview), hide_index=True, width="stretch")
     st.caption(preview.report_note)
-    with st.expander("Explicit baseline update gate", expanded=preview.status == "REVIEW_REQUIRED"):
-        st.write("Baseline writes are disabled unless audit deltas have been reviewed and the exact token is entered.")
+    with st.expander(_L("model_audit.update_gate"), expanded=preview.status == "REVIEW_REQUIRED"):
+        st.write(_L("model_audit.update_gate_note"))
         st.code(MODEL_AUDIT_BASELINE_REVIEW_TOKEN)
-        review_token = st.text_input("Review token", value="", type="password")
-        reviewer_note = st.text_input("Reviewer note", value="")
-        if st.button("Update audit baseline after review", disabled=preview.status != "REVIEW_REQUIRED"):
+        review_token = st.text_input(_L("model_audit.review_token"), value="", type="password")
+        reviewer_note = st.text_input(_L("model_audit.reviewer_note"), value="")
+        if st.button(_L("model_audit.apply_update"), disabled=preview.status != "REVIEW_REQUIRED"):
             try:
                 result = update_model_audit_baseline_after_review(
                     review_token=review_token,
@@ -1091,7 +1229,7 @@ def _build_threshold_experiment_comparison_table(report: ThresholdExperimentRepo
                 "delta_watch_count": deltas.get("watch_count", 0.0),
                 "delta_no_trade_count": deltas.get("no_trade_count", 0.0),
                 "changed_thresholds": ", ".join(sorted(experiment.threshold_overrides)),
-                "caveat": "locked-OOS signal deltas only; no fills, PnL, or profitability claim",
+                "caveat": _L("threshold_experiment.caveat"),
             }
         )
     return pd.DataFrame(rows)
@@ -1124,16 +1262,15 @@ def _split_metric_change_name(name: str) -> tuple[str, str]:
 
 
 def _render_threshold_experiment_comparison(report: ThresholdExperimentReport) -> None:
-    st.subheader("Locked-OOS threshold experiments")
+    st.subheader(_L("panel.threshold_experiments"))
     st.caption(
-        "What-if comparison against the locked-OOS audit baseline. "
-        "Deltas are signal counts only and do not imply better execution or profitability."
+        _L("research.threshold_caption")
     )
     st.dataframe(_build_threshold_experiment_comparison_table(report), hide_index=True, width="stretch")
-    with st.expander("Per-scenario experiment deltas", expanded=False):
+    with st.expander(_L("research.threshold_expander"), expanded=False):
         detail = _build_threshold_experiment_metric_delta_table(report)
         if detail.empty:
-            st.info("No locked-OOS metric deltas for the selected experiments.")
+            st.info(_L("research.threshold_no_delta"))
         else:
             st.dataframe(detail, hide_index=True, width="stretch")
         st.caption(report.report_note)
@@ -1150,16 +1287,15 @@ def _render_research_audit_page(
     fee_profile_id: str | None,
     custom_fee_config: FeeConfig | None,
 ) -> None:
-    st.subheader("Research / Audit")
+    st.subheader(_L("panel.research_audit"))
     st.caption(
-        "Research modules are idle by default. Run them only when you want locked-OOS validation, "
-        "threshold what-if review, model-change audit, or baseline governance."
+        _L("research.page_intro")
     )
     if held_qty <= 0:
-        st.warning("Enter a positive target / held quantity before running evaluation or threshold experiments.")
+        st.warning(_L("research.need_qty"))
 
     can_run_position_sized_research = held_qty > 0
-    if st.button("Run scenario evaluation / locked-OOS", disabled=not can_run_position_sized_research):
+    if st.button(_L("research.run_scenario"), disabled=not can_run_position_sized_research):
         _render_scenario_evaluation_report(
             market_source=market_source,
             held_qty=held_qty,
@@ -1172,9 +1308,9 @@ def _render_research_audit_page(
             custom_fee_config=custom_fee_config,
         )
     else:
-        st.caption("Scenario evaluation is idle.")
+        st.caption(_L("research.scenario_idle"))
 
-    if st.button("Run locked-OOS threshold experiments", disabled=not can_run_position_sized_research):
+    if st.button(_L("research.run_threshold"), disabled=not can_run_position_sized_research):
         _render_locked_oos_threshold_experiments(
             market_source=market_source,
             held_qty=held_qty,
@@ -1187,23 +1323,23 @@ def _render_research_audit_page(
             custom_fee_config=custom_fee_config,
         )
     else:
-        st.caption("Threshold experiments are idle.")
+        st.caption(_L("research.threshold_idle"))
 
-    if st.button("Run model-change audit"):
+    if st.button(_L("research.run_model_audit")):
         try:
             _render_model_change_audit_report(build_model_change_audit_report())
         except Exception as exc:
-            st.warning(f"Model-change audit unavailable: {type(exc).__name__}: {exc}")
+            st.warning(_L("error.model_audit_unavailable", error=f"{type(exc).__name__}: {exc}"))
     else:
-        st.caption("Model-change audit is idle.")
+        st.caption(_L("research.model_audit_idle"))
 
-    if st.button("Load audit baseline update review"):
+    if st.button(_L("research.run_baseline_review")):
         try:
             _render_model_audit_baseline_update_panel(build_model_audit_baseline_update_preview())
         except Exception as exc:
-            st.warning(f"Audit baseline update review unavailable: {type(exc).__name__}: {exc}")
+            st.warning(_L("error.baseline_review_unavailable", error=f"{type(exc).__name__}: {exc}"))
     else:
-        st.caption("Audit baseline update review is idle.")
+        st.caption(_L("research.baseline_review_idle"))
 
 
 def _render_scenario_evaluation_report(
@@ -1217,10 +1353,9 @@ def _render_scenario_evaluation_report(
     fee_profile_id: str | None,
     custom_fee_config: FeeConfig | None,
 ) -> None:
-    st.subheader("Scenario evaluation")
+    st.subheader(_L("research.scenario_title"))
     st.caption(
-        "Registered research comparison: no-trade baseline, simple S->B replay baseline, "
-        "trigger-engine signal diagnostics, and locked OOS rows when available. This is not live-symbol performance evidence."
+        _L("research.scenario_caption")
     )
     trade_qty = _evaluation_trade_qty(market_source, held_qty, max_t_ratio, max_single_trade_qty, risk_limit_preset_id)
     fee_model = _fee_model_for_execution(market_source, False, fee_profile_id, custom_fee_config)
@@ -1236,14 +1371,14 @@ def _render_scenario_evaluation_report(
         table = _build_evaluation_table(report)
         st.dataframe(table, hide_index=True, width="stretch")
         st.caption(report.report_note)
-        with st.expander("Evaluation assumptions"):
-            st.write(f"Synthetic trade quantity: {trade_qty:,}")
-            st.write("No-trade baseline is always shown as zero incremental trading PnL.")
-            st.write("Simple S->B replay is an interpretable baseline, not a production strategy claim.")
-            st.write("Trigger-engine rows are signal diagnostics only; fills and realized PnL are not inferred.")
+        with st.expander(_L("research.assumptions"), expanded=False):
+            st.write(_L("research.synthetic_qty", qty=trade_qty))
+            st.write(_L("research.assumption_no_trade"))
+            st.write(_L("research.assumption_simple_baseline"))
+            st.write(_L("research.assumption_signal_only"))
             st.dataframe(_build_risk_limit_preset_table(risk_limit_preset_id), hide_index=True, width="stretch")
     except Exception as exc:
-        st.error(f"Scenario evaluation unavailable: {type(exc).__name__}: {exc}")
+        st.error(_L("error.scenario_unavailable", error=f"{type(exc).__name__}: {exc}"))
 
 
 def _render_locked_oos_threshold_experiments(
@@ -1270,7 +1405,7 @@ def _render_locked_oos_threshold_experiments(
             )
         )
     except Exception as exc:
-        st.warning(f"Locked-OOS threshold experiments unavailable: {type(exc).__name__}: {exc}")
+        st.warning(_L("error.threshold_unavailable", error=f"{type(exc).__name__}: {exc}"))
 
 
 def _render_evaluation_report(
@@ -1284,13 +1419,12 @@ def _render_evaluation_report(
     fee_profile_id: str | None,
     custom_fee_config: FeeConfig | None,
 ) -> None:
-    st.subheader("Scenario evaluation")
+    st.subheader(_L("research.scenario_title"))
     st.caption(
-        "Registered research comparison: no-trade baseline, simple S->B replay baseline, "
-        "trigger-engine signal diagnostics, and locked OOS rows when available. This is not live-symbol performance evidence."
+        _L("research.scenario_caption")
     )
     if held_qty <= 0:
-        st.warning("Enter a positive target / held quantity to render scenario evaluation.")
+        st.warning(_L("research.need_qty"))
     else:
         trade_qty = _evaluation_trade_qty(market_source, held_qty, max_t_ratio, max_single_trade_qty, risk_limit_preset_id)
         fee_model = _fee_model_for_execution(market_source, False, fee_profile_id, custom_fee_config)
@@ -1306,14 +1440,14 @@ def _render_evaluation_report(
             table = _build_evaluation_table(report)
             st.dataframe(table, hide_index=True, width="stretch")
             st.caption(report.report_note)
-            with st.expander("Evaluation assumptions"):
-                st.write(f"Synthetic trade quantity: {trade_qty:,}")
-                st.write("No-trade baseline is always shown as zero incremental trading PnL.")
-                st.write("Simple S->B replay is an interpretable baseline, not a production strategy claim.")
-                st.write("Trigger-engine rows are signal diagnostics only; fills and realized PnL are not inferred.")
+            with st.expander(_L("research.assumptions"), expanded=False):
+                st.write(_L("research.synthetic_qty", qty=trade_qty))
+                st.write(_L("research.assumption_no_trade"))
+                st.write(_L("research.assumption_simple_baseline"))
+                st.write(_L("research.assumption_signal_only"))
                 st.dataframe(_build_risk_limit_preset_table(risk_limit_preset_id), hide_index=True, width="stretch")
         except Exception as exc:
-            st.error(f"Scenario evaluation unavailable: {type(exc).__name__}: {exc}")
+            st.error(_L("error.scenario_unavailable", error=f"{type(exc).__name__}: {exc}"))
         try:
             _render_threshold_experiment_comparison(
                 build_threshold_experiment_report(
@@ -1325,16 +1459,16 @@ def _render_evaluation_report(
                 )
             )
         except Exception as exc:
-            st.warning(f"Locked-OOS threshold experiments unavailable: {type(exc).__name__}: {exc}")
+            st.warning(_L("error.threshold_unavailable", error=f"{type(exc).__name__}: {exc}"))
     try:
         audit_report = build_model_change_audit_report()
         _render_model_change_audit_report(audit_report)
     except Exception as exc:
-        st.warning(f"Model-change audit unavailable: {type(exc).__name__}: {exc}")
+        st.warning(_L("error.model_audit_unavailable", error=f"{type(exc).__name__}: {exc}"))
     try:
         _render_model_audit_baseline_update_panel(build_model_audit_baseline_update_preview())
     except Exception as exc:
-        st.warning(f"Audit baseline update review unavailable: {type(exc).__name__}: {exc}")
+        st.warning(_L("error.baseline_review_unavailable", error=f"{type(exc).__name__}: {exc}"))
 
 
 def _build_evaluation_table(report: EvaluationReport) -> pd.DataFrame:
@@ -1374,7 +1508,7 @@ def _evaluation_trade_qty(
     max_single_trade_qty: int | None,
     risk_limit_preset_id: str | None = None,
 ) -> int:
-    lot_size = 1 if market_source.startswith("Korea") else 100
+    lot_size = _lot_size_for_market(market_source)
     raw_qty = max_single_trade_qty if max_single_trade_qty is not None else int(held_qty * max_t_ratio)
     preset = risk_limit_preset(risk_limit_preset_id)
     risk_cap_qty = int(held_qty * min(preset.max_daily_turnover_ratio / 2.0, preset.max_same_day_capital_at_risk_ratio))
@@ -1389,7 +1523,7 @@ def _rules_for_market(
     max_single_trade_qty: int | None,
     risk_limit_preset_id: str | None = None,
 ) -> RulesConfig:
-    if market_source.startswith("Korea"):
+    if _is_korea_market(market_source):
         base_rules = _make_rules_config(
             {
                 "lot_size": 1,
@@ -1397,10 +1531,26 @@ def _rules_for_market(
                 "max_t_ratio": max_t_ratio,
                 "max_single_trade_qty": max_single_trade_qty,
                 "start_time": "09:15",
+                "no_new_trade_after": "15:05",
                 "latest_open_time": "15:05",
                 "force_restore_time": "15:20",
                 "close_time": "15:30",
                 "price_limit_pct": 0.30,
+            }
+        )
+    elif _is_us_market(market_source):
+        base_rules = _make_rules_config(
+            {
+                "lot_size": 1,
+                "minimum_order_qty": 1,
+                "max_t_ratio": max_t_ratio,
+                "max_single_trade_qty": max_single_trade_qty,
+                "start_time": "09:30",
+                "no_new_trade_after": "15:35",
+                "latest_open_time": "15:35",
+                "force_restore_time": "15:50",
+                "close_time": "16:00",
+                "price_limit_pct": 1.00,
             }
         )
     else:
@@ -1415,59 +1565,109 @@ def _make_rules_config(values: dict) -> RulesConfig:
 
 def _data_caption(market_source: str, symbol: str, bars) -> str:
     latest = bars[-1]
-    if market_source.startswith("Korea"):
-        return f"Yahoo Finance: {symbol}; latest minute {latest.ts}; price {latest.close:.2f} KRW."
-    return f"Eastmoney: {symbol}; latest minute {latest.ts}; price {latest.close:.2f} RMB."
+    if _is_yahoo_market(market_source):
+        return _L("market.data_caption", market="Yahoo Finance", symbol=symbol, latest=latest.ts, price=latest.close)
+    return _L("market.data_caption", market="Eastmoney", symbol=symbol, latest=latest.ts, price=latest.close)
+
+
+def _is_korea_market(market_source: str) -> bool:
+    return str(market_source or "").startswith("Korea")
+
+
+def _is_us_market(market_source: str) -> bool:
+    return str(market_source or "").startswith("US")
+
+
+def _is_yahoo_market(market_source: str) -> bool:
+    return "Yahoo Finance" in str(market_source or "")
+
+
+def _lot_size_for_market(market_source: str) -> int:
+    return 1 if _is_yahoo_market(market_source) else 100
+
+
+def _fee_market_key(market_source: str) -> str:
+    if _is_us_market(market_source):
+        return "US_EQUITY"
+    if str(market_source or "").startswith("A-share"):
+        return "A_SHARE"
+    return "GENERIC"
 
 
 def _render_intent(intent: TradeIntent) -> None:
-    label = ACTION_LABELS[intent.action_type]
+    label = _action_label(intent.action_type)
     if intent.action_type in {ActionType.TRIGGER_SELL_TO_BUY, ActionType.TRIGGER_BUY_TO_SELL}:
-        st.success(f"{label} | confidence {intent.confidence}")
+        st.success(_L("decision.intent_with_conf", action=label, confidence=intent.confidence))
     elif intent.action_type in {ActionType.MANAGE_OPEN_PAIR, ActionType.FORCE_CLOSE_OR_RESTORE}:
-        st.warning(f"{label} | confidence {intent.confidence}")
+        st.warning(_L("decision.intent_with_conf", action=label, confidence=intent.confidence))
     else:
-        st.info(f"{label} | confidence {intent.confidence}")
+        st.info(_L("decision.intent_with_conf", action=label, confidence=intent.confidence))
 
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Reference price", f"{intent.reference_price:.2f}")
-    c2.metric("Suggested qty", f"{intent.suggested_qty}")
-    c3.metric("Estimated net edge", f"{intent.estimated_net_edge:.2f}")
-    c4.metric("Cost reduction/share", f"{intent.expected_cost_reduction_per_share:.4f}")
-    st.write(f"Next action: {intent.next_action}")
-    _render_list("Reasons", intent.reasons)
-    _render_list("Blockers", intent.blockers)
-    _render_list("Warnings", intent.warnings)
+    c1.metric(_L("intent.reference_price"), f"{intent.reference_price:.2f}")
+    c2.metric(_L("intent.suggested_qty"), f"{intent.suggested_qty}")
+    c3.metric(_L("intent.net_edge"), f"{intent.estimated_net_edge:.2f}")
+    c4.metric(_L("intent.cost_per_share"), f"{intent.expected_cost_reduction_per_share:.4f}")
+    st.write(_L("intent.next_action_prefix", value=intent.next_action or _L("na")))
+    _render_list(_L("intent.reasons"), intent.reasons)
+    _render_list(_L("intent.blockers"), intent.blockers)
+    _render_list(_L("intent.warnings"), intent.warnings)
 
 
 def _render_intent_compact(intent: TradeIntent) -> None:
-    label = ACTION_LABELS[intent.action_type]
+    label = _action_label(intent.action_type)
     if intent.action_type in {ActionType.TRIGGER_SELL_TO_BUY, ActionType.TRIGGER_BUY_TO_SELL}:
         st.success(label)
     elif intent.action_type in {ActionType.MANAGE_OPEN_PAIR, ActionType.FORCE_CLOSE_OR_RESTORE}:
         st.warning(label)
     else:
         st.info(label)
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Confidence", f"{intent.confidence}")
-    col2.metric("Suggested qty", f"{intent.suggested_qty}")
-    col3.metric("Cost reduction/share", f"{intent.expected_cost_reduction_per_share:.4f}")
-    st.markdown(f"**Next action:** {intent.next_action}")
+    col1, col2, col3, col4, col5 = st.columns(5)
+    col1.metric(_L("intent.confidence"), f"{intent.confidence}")
+    col2.metric(_L("intent.suggested_qty"), f"{intent.suggested_qty}")
+    col3.metric(_L("intent.cost_per_share"), f"{intent.expected_cost_reduction_per_share:.4f}")
+    deviation = intent.deviation_decision
+    col4.metric(_L("intent.cost_bps"), f"{(deviation.estimated_round_trip_cost_bps if deviation else 0.0):.2f}")
+    col5.metric(_L("intent.net_edge_bps"), f"{(deviation.net_edge_bps if deviation else 0.0):.2f}")
+    inventory = _inventory_metric_payload(intent)
+    inv1, inv2, inv3, inv4 = st.columns(4)
+    inv1.metric(_L("intent.inventory_ok"), _L("yes") if inventory["inventory_ok"] else _L("no"))
+    inv2.metric(_L("intent.sellable_after"), f"{inventory['sellable_after_trade']:,}")
+    inv3.metric(_L("intent.inventory_delta"), f"{inventory['inventory_delta_after_trade']:+,}")
+    inv4.metric(_L("intent.capital_required"), f"{inventory['capital_required']:,.2f}")
+    st.markdown(_L("intent.next_action_prefix", value=intent.next_action or _L("na")))
     if intent.reasons:
-        st.caption("Key reasons: " + "; ".join(intent.reasons[:2]))
+        st.caption(_L("intent.key_reasons") + ": " + "; ".join(intent.reasons[:2]))
     if intent.blockers:
-        st.warning("Primary blocker: " + intent.blockers[0])
+        st.warning(_L("intent.primary_blocker") + ": " + intent.blockers[0])
+
+
+def _inventory_metric_payload(intent: TradeIntent) -> dict[str, int | float | bool]:
+    inventory = intent.inventory_decision
+    if inventory is None:
+        return {
+            "inventory_ok": False,
+            "sellable_after_trade": 0,
+            "inventory_delta_after_trade": 0,
+            "capital_required": 0.0,
+        }
+    return {
+        "inventory_ok": inventory.executable,
+        "sellable_after_trade": inventory.sellable_after_trade,
+        "inventory_delta_after_trade": inventory.inventory_delta_after_trade,
+        "capital_required": inventory.capital_required,
+    }
 
 
 def _render_decision_summary(summary: DecisionSummary) -> None:
-    st.subheader("Decision summary")
+    st.subheader(_L("panel.decision_summary"))
     top = st.columns(3)
-    _render_summary_section(top[0], "Recommendation", summary.recommendation)
-    _render_summary_section(top[1], "Invalidation", summary.invalidation)
-    _render_summary_section(top[2], "Position impact", summary.position_impact)
+    _render_summary_section(top[0], _L("summary.recommendation"), summary.recommendation)
+    _render_summary_section(top[1], _L("summary.invalidation"), summary.invalidation)
+    _render_summary_section(top[2], _L("summary.position_impact"), summary.position_impact)
     bottom = st.columns(2)
-    _render_summary_section(bottom[0], "Evidence", summary.evidence)
-    _render_summary_section(bottom[1], "Caveats", summary.caveats)
+    _render_summary_section(bottom[0], _L("summary.evidence"), summary.evidence)
+    _render_summary_section(bottom[1], _L("summary.caveats"), summary.caveats)
 
 
 def _render_summary_section(column, title: str, rows: list[str]) -> None:
@@ -1493,7 +1693,7 @@ def _status_strip_payload(disclosure: DataSourceDisclosure, report: DataQualityR
         status = "OK"
     return {
         "data": disclosure.source_grade,
-        "broker_confirmed": "Yes" if disclosure.broker_confirmed else "No",
+        "broker_confirmed": _L("status.broker_yes") if disclosure.broker_confirmed else _L("status.broker_no"),
         "latest_bar": report.latest_ts,
         "status": status,
         "bars": str(report.bar_count),
@@ -1508,8 +1708,7 @@ def _should_expand_data_risk_details(disclosure: DataSourceDisclosure, report: D
 def _render_status_strip(disclosure: DataSourceDisclosure, report: DataQualityReport, intent: TradeIntent) -> None:
     payload = _status_strip_payload(disclosure, report, intent)
     message = (
-        f"Data: {payload['data']} | Broker confirmed: {payload['broker_confirmed']} | "
-        f"Latest bar: {payload['latest_bar']} | Bars: {payload['bars']} | Status: {payload['status']}"
+        _L("status.strip_template", data=payload["data"], broker_confirmed=payload["broker_confirmed"], latest_bar=payload["latest_bar"], bars=payload["bars"], status=_L(f"status.{payload['status'].lower()}"))
     )
     if payload["status"] == "OK":
         st.success(message)
@@ -1521,23 +1720,24 @@ def _render_status_strip(disclosure: DataSourceDisclosure, report: DataQualityRe
 
 def _render_data_risk_details(disclosure: DataSourceDisclosure, report: DataQualityReport, intent: TradeIntent) -> None:
     expanded = _should_expand_data_risk_details(disclosure, report, intent)
-    with st.expander("Data source caveats", expanded=expanded):
+    with st.expander(_L("panel.source_caveats"), expanded=expanded):
         _render_data_source_disclosure(disclosure)
-    with st.expander("Data quality details", expanded=expanded):
+    with st.expander(_L("panel.data_quality"), expanded=expanded):
         _render_data_quality(report)
 
 
 def _render_data_source_disclosure(disclosure: DataSourceDisclosure) -> None:
     st.warning(disclosure.summary())
     cols = st.columns(3)
-    cols[0].metric("Source grade", disclosure.source_grade)
-    cols[1].metric("Broker confirmed", "Yes" if disclosure.broker_confirmed else "No")
-    cols[2].metric("Delay status", disclosure.delay_status)
+    cols[0].metric(_L("panel.source_grade"), disclosure.source_grade)
+    cols[1].metric(_L("intent.broker_confirmed"), _L("status.broker_yes") if disclosure.broker_confirmed else _L("status.broker_no"))
+    cols[2].metric(_L("panel.delay_status"), disclosure.delay_status)
     st.dataframe(_build_source_disclosure_table(disclosure), hide_index=True, width="stretch")
-    st.caption("Live guidance remains decision support until broker-confirmed market data, holdings, and executions are checked.")
+    st.caption(_L("status.live_note"))
 
 def _render_data_quality(report: DataQualityReport) -> None:
     message = f"{report.status}: {report.confidence_note}"
+    message = f"{_L(f'status.{report.status.lower()}')}: {report.confidence_note}"
     if report.status == "OK":
         st.success(message)
     elif report.status == "BAD":
@@ -1546,11 +1746,11 @@ def _render_data_quality(report: DataQualityReport) -> None:
         st.warning(message)
 
     cols = st.columns(3)
-    cols[0].metric("Bars", f"{report.bar_count}")
-    cols[1].metric("Latest bar", report.latest_ts)
-    cols[2].metric("Checks", f"{len(report.checks)}")
+    cols[0].metric(_L("market.bars"), f"{report.bar_count}")
+    cols[1].metric(_L("market.latest_bar"), report.latest_ts)
+    cols[2].metric(_L("status.checks"), f"{len(report.checks)}")
 
-    with st.expander("Data quality details", expanded=report.status != "OK"):
+    with st.expander(_L("panel.data_quality"), expanded=report.status != "OK"):
         st.dataframe(
             pd.DataFrame([check.as_dict() for check in report.checks]),
             hide_index=True,
@@ -1567,27 +1767,31 @@ def _render_market(
     show_chart_markers: bool = False,
     chart_df: pd.DataFrame | None = None,
 ) -> None:
-    st.subheader("Intraday market")
-    if market_source.startswith("Korea"):
-        st.caption("Yahoo minute turnover is approximated from close * volume; use it as a prototype signal only.")
+    st.subheader(_L("panel.intraday_market"))
+    if _is_yahoo_market(market_source):
+        st.caption(_L("market.source_hint"))
     df = _build_market_frame(bars)
     plot_df = chart_df if chart_df is not None else df
     _render_market_ratio_metrics(df, intent)
     _render_signal_summary(signal_markers)
     if chart_df is not None and len(chart_df) != len(df):
         st.caption(
-            f"Chart shows full session context ({len(chart_df)} bars); model metrics and yellow marker use bars through {pd.Timestamp(df.iloc[-1]['time']):%H:%M} only."
+            _L(
+                "market.marker_caption",
+                total=len(chart_df),
+                time=pd.Timestamp(df.iloc[-1]["time"]).strftime("%H:%M"),
+            )
         )
     _render_price_chart(plot_df, signal_markers, intent, show_markers=show_chart_markers)
     _render_ratio_chart(plot_df)
     _render_signal_detail(signal_markers)
-    with st.expander("TradeIntent JSON"):
+    with st.expander(_L("panel.trade_intent_json")):
         st.json(intent.as_dict())
 
 
 def _render_layers(intent: TradeIntent) -> None:
-    st.subheader("Decision layers")
-    st.caption("Read order: regime, price deviation, then inventory and capital constraints.")
+    st.subheader(_L("layer.header"))
+    st.caption(_L("layer.subtitle"))
     payload = intent.as_dict()
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -1596,8 +1800,8 @@ def _render_layers(intent: TradeIntent) -> None:
         _render_deviation_card(payload.get("deviation_decision"))
     with col3:
         _render_inventory_card(payload.get("inventory_decision"))
-    with st.expander("Raw layer JSON"):
-        tabs = st.tabs(["Regime", "Deviation", "Inventory"])
+    with st.expander(_L("panel.raw_json")):
+        tabs = st.tabs([_L("panel.regime"), _L("panel.deviation"), _L("panel.inventory")])
         with tabs[0]:
             st.json(payload.get("regime_decision") or {})
         with tabs[1]:
@@ -1633,13 +1837,12 @@ def _nearest_closed_minute(selected: pd.Timestamp, market_df: pd.DataFrame) -> p
 
 def _render_replay_mode_banner(replay_time: pd.Timestamp | None) -> None:
     if replay_time is None:
-        st.caption("Live mode: showing the latest closed minute.")
+        st.caption(_L("status.live_mode"))
         return
     st.info(
-        f"Replay mode: showing model state as of selected closed minute {replay_time:%H:%M}. "
-        "No future bars after this time are used."
+        _L("status.replay_mode", time=pd.Timestamp(replay_time).strftime("%H:%M"))
     )
-    if st.button("Back to Live", key="back_to_live"):
+    if st.button(_L("status.replay_back"), key="back_to_live"):
         st.session_state.pop(_REPLAY_TIME_KEY, None)
         st.session_state[_PRICE_CHART_WIDGET_VERSION_KEY] = int(st.session_state.get(_PRICE_CHART_WIDGET_VERSION_KEY, 0)) + 1
         st.rerun()
@@ -1673,49 +1876,71 @@ def _render_market_ratio_metrics(df: pd.DataFrame, intent: TradeIntent) -> None:
     session_date = pd.Timestamp(latest["time"]).date()
 
     cols = st.columns(4)
-    cols[0].metric("Close vs open", _fmt_pct(float(latest["close_vs_open_pct"])))
-    cols[1].metric("VWAP deviation", _fmt_pct(float(latest["vwap_deviation_pct"])))
-    cols[2].metric("Intraday amplitude", _fmt_pct(amplitude_pct))
-    cols[3].metric("Suggested ratio", _fmt_pct_unsigned(intent.suggested_ratio * 100), help="Suggested qty / target qty")
-    st.caption(f"Session {session_date}; bars {len(df)}; latest {latest['close']:.2f}; open {open_price:.2f}; VWAP {latest['vwap']:.2f}.")
+    cols[0].metric(_L("market.close_vs_open"), _fmt_pct(float(latest["close_vs_open_pct"])))
+    cols[1].metric(_L("market.vwap_deviation"), _fmt_pct(float(latest["vwap_deviation_pct"])))
+    cols[2].metric(_L("market.amplitude"), _fmt_pct(amplitude_pct))
+    cols[3].metric(_L("market.suggested_ratio"), _fmt_pct_unsigned(intent.suggested_ratio * 100), help=_L("intent.suggested_ratio_help"))
+    st.caption(
+        _L(
+            "market.metrics_prefix",
+            date=session_date,
+            count=len(df),
+            latest=float(latest["close"]),
+            open=open_price,
+            vwap=float(latest["vwap"]),
+        )
+    )
 
 
 def _render_signal_summary(signal_markers: pd.DataFrame) -> None:
     if signal_markers.empty:
-        st.caption("No SB/BS lifecycle opportunities in the scanned minutes.")
+        st.caption(_L("market.no_opportunities"))
         return
     if "state" in signal_markers.columns:
         counts = signal_markers["state"].value_counts().to_dict()
         st.caption(
-            "Opportunity lifecycle scan: "
-            f"watch {counts.get('WATCH', 0)}, probe {counts.get('PROBE', 0)}, add {counts.get('ADD', 0)}, "
-            f"confirm {counts.get('CONFIRM', 0)}, close-ready {counts.get('CLOSE_READY', 0)}, "
-            f"forced {counts.get('FORCED_DECISION', 0)}, expired {counts.get('EXPIRED', 0)}, blocked {counts.get('BLOCKED', 0)}. "
-            "Signal-only; no fills or realized PnL are inferred."
+            _L(
+                "market.signal_counts_main",
+                watch=counts.get("WATCH", 0),
+                enter=counts.get("ENTER", 0),
+                exit=counts.get("EXIT", 0),
+                abort=counts.get("ABORT", 0),
+            )
         )
         return
     counts = signal_markers["signal"].value_counts().to_dict()
     st.caption(
-        "Signal scan: "
-        f"SB {counts.get('SB', 0)}, BS {counts.get('BS', 0)}, "
-        f"Watch S->B {counts.get('Watch S->B', 0)}, Watch B->S {counts.get('Watch B->S', 0)}."
+        _L(
+            "market.signal_counts_simple",
+            sb=counts.get("SB", 0),
+            bs=counts.get("BS", 0),
+            watch_sb=counts.get("Watch S->B", 0),
+            watch_bs=counts.get("Watch B->S", 0),
+        )
     )
 
 
 def _render_price_chart(df: pd.DataFrame, signal_markers: pd.DataFrame, intent: TradeIntent, show_markers: bool = False) -> None:
     chart_df = df[["time", "close", "vwap"]].melt("time", var_name="line", value_name="price")
-    chart_df["line"] = chart_df["line"].map({"close": "Price", "vwap": "VWAP"})
+    chart_df["line"] = chart_df["line"].map({"close": _L("chart.price"), "vwap": _L("chart.vwap")})
     base = (
         alt.Chart(chart_df)
         .mark_line(strokeWidth=2)
         .encode(
-            x=alt.X("time:T", title="Time"),
-            y=alt.Y("price:Q", title="Price", scale=alt.Scale(zero=False)),
-            color=alt.Color("line:N", title="", scale=alt.Scale(domain=["Price", "VWAP"], range=["#2563eb", "#d97706"])),
+            x=alt.X("time:T", title=_L("chart.time")),
+            y=alt.Y("price:Q", title=_L("chart.price"), scale=alt.Scale(zero=False)),
+            color=alt.Color(
+                "line:N",
+                title="",
+                scale=alt.Scale(
+                    domain=[_L("chart.price"), _L("chart.vwap")],
+                    range=["#2563eb", "#d97706"],
+                ),
+            ),
             tooltip=[
-                alt.Tooltip("time:T", title="Time", format="%H:%M"),
-                alt.Tooltip("line:N", title="Line"),
-                alt.Tooltip("price:Q", title="Price", format=",.2f"),
+                alt.Tooltip("time:T", title=_L("chart.time"), format="%H:%M"),
+                alt.Tooltip("line:N", title=_L("chart.line")),
+                alt.Tooltip("price:Q", title=_L("chart.price"), format=",.2f"),
             ],
         )
         .properties(height=260)
@@ -1725,18 +1950,18 @@ def _render_price_chart(df: pd.DataFrame, signal_markers: pd.DataFrame, intent: 
         alt.Chart(current_marker)
         .mark_rule(color="#facc15", strokeDash=[6, 4], strokeWidth=2)
         .encode(
-            x=alt.X("time:T", title="Time"),
+            x=alt.X("time:T", title=_L("chart.time")),
             tooltip=[
-                alt.Tooltip("time:T", title="Latest closed minute", format="%H:%M"),
-                alt.Tooltip("action:N", title="Current action"),
-                alt.Tooltip("price:Q", title="Reference price", format=",.2f"),
-                alt.Tooltip("confidence:Q", title="Confidence"),
-                alt.Tooltip("suggested_qty:Q", title="Qty", format=","),
-                alt.Tooltip("suggested_ratio_pct:Q", title="Suggested ratio %", format=".2f"),
-                alt.Tooltip("vwap_deviation_pct:Q", title="VWAP dev %", format=".3f"),
-                alt.Tooltip("net_edge:Q", title="Net edge", format=",.2f"),
-                alt.Tooltip("reason:N", title="Reason"),
-                alt.Tooltip("note:N", title="Caveat"),
+                alt.Tooltip("time:T", title=_L("chart.latest_closed_minute"), format="%H:%M"),
+                alt.Tooltip("action:N", title=_L("chart.current_action")),
+                alt.Tooltip("price:Q", title=_L("intent.reference_price"), format=",.2f"),
+                alt.Tooltip("confidence:Q", title=_L("intent.confidence")),
+                alt.Tooltip("suggested_qty:Q", title=_L("execution.qty"), format=","),
+                alt.Tooltip("suggested_ratio_pct:Q", title=_L("summary.suggested_ratio"), format=".2f"),
+                alt.Tooltip("vwap_deviation_pct:Q", title=_L("market.vwap_deviation"), format=".3f"),
+                alt.Tooltip("net_edge:Q", title=_L("intent.net_edge"), format=",.2f"),
+                alt.Tooltip("reason:N", title=_L("intent.reasons")),
+                alt.Tooltip("note:N", title=_L("summary.caveat_warning")),
             ],
         )
     )
@@ -1744,16 +1969,20 @@ def _render_price_chart(df: pd.DataFrame, signal_markers: pd.DataFrame, intent: 
         alt.Chart(current_marker)
         .mark_point(filled=True, size=260, color="#facc15", stroke="#111827", strokeWidth=1.5)
         .encode(
-            x=alt.X("time:T", title="Time"),
-            y=alt.Y("price:Q", title="Price", scale=alt.Scale(zero=False)),
-            shape=alt.Shape("side:N", title="Current side", scale=alt.Scale(domain=["S->B", "B->S", "None"], range=["triangle-down", "triangle-up", "circle"])),
+            x=alt.X("time:T", title=_L("chart.time")),
+            y=alt.Y("price:Q", title=_L("chart.price"), scale=alt.Scale(zero=False)),
+            shape=alt.Shape(
+                "side:N",
+                title=_L("panel.side"),
+                scale=alt.Scale(domain=["S->B", "B->S", "None"], range=["triangle-down", "triangle-up", "circle"]),
+            ),
             tooltip=[
-                alt.Tooltip("time:T", title="Latest closed minute", format="%H:%M"),
-                alt.Tooltip("action:N", title="Current action"),
-                alt.Tooltip("price:Q", title="Reference price", format=",.2f"),
-                alt.Tooltip("confidence:Q", title="Confidence"),
-                alt.Tooltip("suggested_qty:Q", title="Qty", format=","),
-                alt.Tooltip("reason:N", title="Reason"),
+                alt.Tooltip("time:T", title=_L("chart.latest_closed_minute"), format="%H:%M"),
+                alt.Tooltip("action:N", title=_L("chart.current_action")),
+                alt.Tooltip("price:Q", title=_L("intent.reference_price"), format=",.2f"),
+                alt.Tooltip("confidence:Q", title=_L("intent.confidence")),
+                alt.Tooltip("suggested_qty:Q", title=_L("execution.qty"), format=","),
+                alt.Tooltip("reason:N", title=_L("intent.reasons")),
             ],
         )
     )
@@ -1773,10 +2002,10 @@ def _render_price_chart(df: pd.DataFrame, signal_markers: pd.DataFrame, intent: 
         alt.Chart(selection_df)
         .mark_rule(strokeWidth=12, opacity=0.001)
         .encode(
-            x=alt.X("time:T", title="Time"),
+            x=alt.X("time:T", title=_L("chart.time")),
             tooltip=[
-                alt.Tooltip("time:T", title="Click to replay at", format="%H:%M"),
-                alt.Tooltip("close:Q", title="Close", format=",.2f"),
+                alt.Tooltip("time:T", title=_L("chart.click_to_replay"), format="%H:%M"),
+                alt.Tooltip("close:Q", title=_L("chart.close"), format=",.2f"),
             ],
         )
         .add_params(minute_selection)
@@ -1784,22 +2013,22 @@ def _render_price_chart(df: pd.DataFrame, signal_markers: pd.DataFrame, intent: 
     chart = base + current_rule + current_point + current_label + click_rules
     if show_markers and not signal_markers.empty:
         has_state = "state" in signal_markers.columns
-        visible_markers = signal_markers if has_state else signal_markers[signal_markers["level"] == "Trigger"]
+        visible_markers = _main_chart_signal_markers(signal_markers) if has_state else signal_markers[signal_markers["level"] == "Trigger"]
         if visible_markers.empty:
-            visible_markers = signal_markers
+            visible_markers = _main_chart_signal_markers(signal_markers)
         color_encoding = (
             alt.Color(
                 "state:N",
-                title="State",
+                title=_L("chart.state"),
                 scale=alt.Scale(
-                    domain=["WATCH", "PROBE", "ADD", "CONFIRM", "CLOSE_READY", "FORCED_DECISION", "EXPIRED", "BLOCKED"],
-                    range=["#64748b", "#2563eb", "#7c3aed", "#16a34a", "#22c55e", "#f59e0b", "#a16207", "#dc2626"],
+                    domain=["ENTER", "EXIT", "ABORT"],
+                    range=["#2563eb", "#22c55e", "#dc2626"],
                 ),
             )
             if has_state
             else alt.Color(
                 "signal:N",
-                title="Signal",
+                title=_L("chart.signal"),
                 scale=alt.Scale(domain=["SB", "BS", "Watch S->B", "Watch B->S"], range=["#dc2626", "#16a34a", "#ea580c", "#65a30d"]),
             )
         )
@@ -1808,43 +2037,47 @@ def _render_price_chart(df: pd.DataFrame, signal_markers: pd.DataFrame, intent: 
                 "state:N",
                 legend=None,
                 scale=alt.Scale(
-                    domain=["WATCH", "PROBE", "ADD", "CONFIRM", "CLOSE_READY", "FORCED_DECISION", "EXPIRED", "BLOCKED"],
-                    range=["#64748b", "#2563eb", "#7c3aed", "#16a34a", "#22c55e", "#f59e0b", "#a16207", "#dc2626"],
+                    domain=["ENTER", "EXIT", "ABORT"],
+                    range=["#2563eb", "#22c55e", "#dc2626"],
                 ),
             )
             if has_state
             else alt.Color("signal:N", legend=None, scale=alt.Scale(domain=["SB", "BS"], range=["#dc2626", "#16a34a"]))
         )
         tooltip = [
-            alt.Tooltip("time:T", title="Time", format="%H:%M"),
-            alt.Tooltip("action:N", title="Action"),
-            alt.Tooltip("price:Q", title="Price", format=",.2f"),
-            alt.Tooltip("confidence:Q", title="Confidence"),
-            alt.Tooltip("suggested_qty:Q", title="Qty", format=","),
-            alt.Tooltip("vwap_deviation_pct:Q", title="VWAP dev %", format=".3f"),
-            alt.Tooltip("anchor_type:N", title="Anchor"),
-            alt.Tooltip("exhaustion_score:Q", title="Exhaustion", format=".1f"),
-            alt.Tooltip("liquidity_score:Q", title="Liquidity", format=".1f"),
-            alt.Tooltip("net_edge:Q", title="Net edge", format=",.2f"),
-            alt.Tooltip("target_price:Q", title="Target", format=",.2f"),
-            alt.Tooltip("invalidation_price:Q", title="Invalidation", format=",.2f"),
-            alt.Tooltip("reason_codes:N", title="Reason codes"),
-            alt.Tooltip("blocked_reasons:N", title="Blocked reasons"),
-            alt.Tooltip("why_not_earlier:N", title="Why not earlier"),
-            alt.Tooltip("reason:N", title="Reason"),
+            alt.Tooltip("time:T", title=_L("chart.time"), format="%H:%M"),
+            alt.Tooltip("action:N", title=_L("chart.action")),
+            alt.Tooltip("price:Q", title=_L("chart.price"), format=",.2f"),
+            alt.Tooltip("confidence:Q", title=_L("intent.confidence")),
+            alt.Tooltip("suggested_qty:Q", title=_L("execution.qty"), format=","),
+            alt.Tooltip("vwap_deviation_pct:Q", title=_L("market.vwap_deviation"), format=".3f"),
+            alt.Tooltip("anchor_type:N", title=_L("market.anchor")),
+            alt.Tooltip("exhaustion_score:Q", title=_L("chart.exhaustion"), format=".1f"),
+            alt.Tooltip("liquidity_score:Q", title=_L("chart.liquidity"), format=".1f"),
+            alt.Tooltip("debug_state:N", title=_L("chart.debug_state")),
+            alt.Tooltip("regime_simple:N", title=_L("chart.regime_simple")),
+            alt.Tooltip("cost_bps:Q", title=_L("chart.cost_bps"), format=".2f"),
+            alt.Tooltip("net_edge_bps:Q", title=_L("chart.net_edge_bps"), format=".2f"),
+            alt.Tooltip("net_edge:Q", title=_L("intent.net_edge"), format=",.2f"),
+            alt.Tooltip("target_price:Q", title=_L("summary.expected_reversion"), format=",.2f"),
+            alt.Tooltip("invalidation_price:Q", title=_L("summary.invalidation_price"), format=",.2f"),
+            alt.Tooltip("reason_codes:N", title=_L("chart.reason_codes")),
+            alt.Tooltip("blocked_reasons:N", title=_L("intent.blockers")),
+            alt.Tooltip("why_not_earlier:N", title=_L("chart.why_not_earlier")),
+            alt.Tooltip("reason:N", title=_L("intent.reasons")),
         ]
         if has_state:
-            tooltip.insert(1, alt.Tooltip("state:N", title="State"))
-            tooltip.append(alt.Tooltip("note:N", title="Caveat"))
+            tooltip.insert(1, alt.Tooltip("state:N", title=_L("chart.state")))
+            tooltip.append(alt.Tooltip("note:N", title=_L("summary.caveat_warning")))
         points = (
             alt.Chart(visible_markers)
             .mark_point(filled=True, opacity=0.9)
             .encode(
-                x=alt.X("time:T", title="Time"),
-                y=alt.Y("price:Q", title="Price", scale=alt.Scale(zero=False)),
+                x=alt.X("time:T", title=_L("chart.time")),
+                y=alt.Y("price:Q", title=_L("chart.price"), scale=alt.Scale(zero=False)),
                 color=color_encoding,
-                shape=alt.Shape("side:N", title="Side", scale=alt.Scale(domain=["S->B", "B->S"], range=["triangle-down", "triangle-up"])),
-                size=alt.Size("level:N", title="Level", scale=alt.Scale(domain=["Watch", "Probe", "Add", "Confirm", "Lifecycle"], range=[70, 170, 210, 230, 150])),
+                shape=alt.Shape("side:N", title=_L("panel.side"), scale=alt.Scale(domain=["S->B", "B->S"], range=["triangle-down", "triangle-up"])),
+                size=alt.Size("state:N", title=_L("chart.marker_level"), scale=alt.Scale(domain=["ENTER", "EXIT", "ABORT"], range=[190, 160, 170])),
                 tooltip=tooltip,
             )
         )
@@ -1855,7 +2088,7 @@ def _render_price_chart(df: pd.DataFrame, signal_markers: pd.DataFrame, intent: 
             .encode(
                 x="time:T",
                 y="price:Q",
-                text="state:N" if has_state else "signal:N",
+                text="action:N" if has_state else "signal:N",
                 color=label_color,
             )
         )
@@ -1868,6 +2101,12 @@ def _render_price_chart(df: pd.DataFrame, signal_markers: pd.DataFrame, intent: 
         selection_mode=["minute_select"],
     )
     _update_replay_time_from_chart_event(chart_event, df)
+
+
+def _main_chart_signal_markers(signal_markers: pd.DataFrame) -> pd.DataFrame:
+    if signal_markers.empty or "state" not in signal_markers.columns:
+        return signal_markers
+    return signal_markers[signal_markers["state"].isin(["ENTER", "EXIT", "ABORT"])]
 
 
 def _render_signal_detail(signal_markers: pd.DataFrame) -> None:
@@ -1900,6 +2139,7 @@ def _render_signal_detail(signal_markers: pd.DataFrame) -> None:
             "price",
             "confidence",
             "suggested_qty",
+            "deviation_bps",
             "vwap_deviation",
             "anchor_type",
             "deviation_score",
@@ -1919,7 +2159,7 @@ def _render_signal_detail(signal_markers: pd.DataFrame) -> None:
         ]
         if column in detail.columns
     ]
-    with st.expander("Signal details"):
+    with st.expander(_L("panel.signal_details")):
         st.dataframe(
             detail[columns],
             hide_index=True,
@@ -2004,18 +2244,25 @@ def _selection_time_candidate(payload):
     return payload
 def _render_ratio_chart(df: pd.DataFrame) -> None:
     ratio_df = df[["time", "close_vs_open_pct", "vwap_deviation_pct"]].melt("time", var_name="ratio", value_name="pct")
-    label_map = {"close_vs_open_pct": "Close vs open", "vwap_deviation_pct": "VWAP deviation"}
+    label_map = {"close_vs_open_pct": _L("market.close_vs_open"), "vwap_deviation_pct": _L("market.vwap_deviation")}
     ratio_df["ratio"] = ratio_df["ratio"].map(label_map)
     line = (
         alt.Chart(ratio_df)
         .mark_line(strokeWidth=2)
         .encode(
-            x=alt.X("time:T", title="Time"),
-            y=alt.Y("pct:Q", title="Percent", axis=alt.Axis(format=".2f")),
-            color=alt.Color("ratio:N", title="", scale=alt.Scale(domain=["Close vs open", "VWAP deviation"], range=["#16a34a", "#ca8a04"])),
+            x=alt.X("time:T", title=_L("chart.time")),
+            y=alt.Y("pct:Q", title=_L("chart.percent"), axis=alt.Axis(format=".2f")),
+            color=alt.Color(
+                "ratio:N",
+                title="",
+                scale=alt.Scale(
+                    domain=[_L("market.close_vs_open"), _L("market.vwap_deviation")],
+                    range=["#16a34a", "#ca8a04"],
+                ),
+            ),
             tooltip=[
-                alt.Tooltip("time:T", title="Time", format="%H:%M"),
-                alt.Tooltip("ratio:N", title="Ratio"),
+                alt.Tooltip("time:T", title=_L("chart.time"), format="%H:%M"),
+                alt.Tooltip("ratio:N", title=_L("chart.ratio")),
                 alt.Tooltip("pct:Q", title="%", format=".3f"),
             ],
         )
@@ -2026,56 +2273,56 @@ def _render_ratio_chart(df: pd.DataFrame) -> None:
 
 def _render_regime_card(regime: dict | None) -> None:
     with st.container(border=True):
-        st.markdown("**1. Regime**")
+        st.markdown(f"**1. {_L('panel.regime')}**")
         if not regime:
-            st.info("Not calculated.")
+            st.info(_L("layer.not_calculated"))
             return
         regime_type = regime.get("regime_type", "")
         blockers = regime.get("blockers") or []
-        status = "Blocked" if blockers else "Passed"
-        st.metric(status, REGIME_LABELS.get(regime_type, regime_type), delta=f"confidence {regime.get('confidence', 0)}")
-        st.write(f"S->B: {_yes_no(regime.get('allow_sell_to_buy'))} | B->S: {_yes_no(regime.get('allow_buy_to_sell'))}")
-        _render_compact_rows("Reasons", regime.get("reasons") or ["No reason returned."])
-        _render_compact_rows("Blockers", blockers)
+        status = _L("layer.blocked") if blockers else _L("layer.passed")
+        st.metric(status, _regime_label(regime_type), delta=f"{_L('summary.confidence_prefix', value=regime.get('confidence', 0))}")
+        st.write(f"{_L('side.sb')}: {_yes_no(regime.get('allow_sell_to_buy'))} | {_L('side.bs')}: {_yes_no(regime.get('allow_buy_to_sell'))}")
+        _render_compact_rows(_L("intent.reasons"), regime.get("reasons") or [_L("layer.no_reason")])
+        _render_compact_rows(_L("intent.blockers"), blockers)
 
 
 def _render_deviation_card(deviation: dict | None) -> None:
     with st.container(border=True):
-        st.markdown("**2. Price deviation**")
+        st.markdown(f"**2. {_L('panel.deviation')}**")
         if not deviation:
-            st.info("Not calculated because regime or deviation did not pass.")
+            st.info(_L("layer.not_calculated_regime"))
             return
         side = deviation.get("side_candidate", "NONE")
         score = float(deviation.get("deviation_score") or 0.0)
-        st.metric("Candidate", SIDE_LABELS.get(side, side), delta=f"score {score:.2f}x")
+        st.metric(_L("layer.candidate"), _side_label(side), delta=f"{_L('layer.score')} {score:.2f}x")
         c1, c2 = st.columns(2)
-        c1.metric("Net edge", f"{float(deviation.get('net_edge_after_fee') or 0):,.2f}")
-        c2.metric("Max wait", f"{int(deviation.get('max_wait_minutes') or 0)} min")
+        c1.metric(_L("summary.net_edge"), f"{float(deviation.get('net_edge_after_fee') or 0):,.2f}")
+        c2.metric(_L("layer.max_wait"), f"{int(deviation.get('max_wait_minutes') or 0)} {_L('chart.min')}")
         if deviation.get("expected_reversion_zone") is not None:
-            st.write(f"Reversion zone: {float(deviation['expected_reversion_zone']):,.2f}")
+            st.write(f"{_L('summary.expected_reversion')}: {float(deviation['expected_reversion_zone']):,.2f}")
         if deviation.get("invalidation_price") is not None:
-            st.write(f"Invalidation: {float(deviation['invalidation_price']):,.2f}")
-        _render_compact_rows("Reasons", deviation.get("reasons") or [])
-        _render_compact_rows("Warnings", deviation.get("warnings") or [])
+            st.write(f"{_L('summary.invalidation_price')}: {float(deviation['invalidation_price']):,.2f}")
+        _render_compact_rows(_L("intent.reasons"), deviation.get("reasons") or [])
+        _render_compact_rows(_L("intent.warnings"), deviation.get("warnings") or [])
 
 
 def _render_inventory_card(inventory: dict | None) -> None:
     with st.container(border=True):
-        st.markdown("**3. Inventory**")
+        st.markdown(f"**3. {_L('panel.inventory')}**")
         if not inventory:
-            st.info("Not calculated because the prior layers did not produce an executable side.")
+            st.info(_L("layer.not_calculated_inventory"))
             return
         executable = bool(inventory.get("executable"))
-        status = "Executable" if executable else "Not executable"
+        status = _L("inventory.executable") if executable else _L("inventory.not_executable")
         qty = int(inventory.get("suggested_qty") or 0)
-        st.metric(status, f"{qty:,} shares", delta=_fmt_pct(float(inventory.get("suggested_ratio") or 0) * 100))
+        st.metric(status, f"{qty:,} {_L('layer.shares')}", delta=_fmt_pct(float(inventory.get('suggested_ratio') or 0) * 100))
         c1, c2 = st.columns(2)
-        c1.metric("Capital required", f"{float(inventory.get('capital_required') or 0):,.2f}")
-        c2.metric("Sellable after trade", f"{int(inventory.get('sellable_after_trade') or 0):,} shares")
+        c1.metric(_L("execution.cash_required"), f"{float(inventory.get('capital_required') or 0):,.2f}")
+        c2.metric(_L("layer.sellable_after"), f"{int(inventory.get('sellable_after_trade') or 0):,} {_L('layer.shares')}")
         delta = int(inventory.get("inventory_delta_after_trade") or 0)
-        st.write(f"Inventory delta: {delta:+,} shares")
-        _render_compact_rows("Reasons", inventory.get("reasons") or [])
-        _render_compact_rows("Blockers", inventory.get("blockers") or [])
+        st.write(f"{_L('summary.inventory_delta')}: {delta:+,} {_L('layer.shares')}")
+        _render_compact_rows(_L("intent.reasons"), inventory.get("reasons") or [])
+        _render_compact_rows(_L("intent.blockers"), inventory.get("blockers") or [])
 
 
 def _render_compact_rows(title: str, rows: list[str]) -> None:
@@ -2085,7 +2332,7 @@ def _render_compact_rows(title: str, rows: list[str]) -> None:
     for row in rows[:4]:
         st.markdown(f"- {row}")
     if len(rows) > 4:
-        st.caption(f"{len(rows) - 4} more rows in raw JSON.")
+        st.caption(_L("layer.raw_rows_more", count=len(rows) - 4))
 
 
 def _render_list(title: str, rows: list[str]) -> None:
@@ -2097,7 +2344,7 @@ def _render_list(title: str, rows: list[str]) -> None:
 
 
 def _yes_no(value: bool | None) -> str:
-    return "yes" if value else "no"
+    return _L("yes") if value else _L("no")
 
 
 def _fmt_pct(value: float) -> str:

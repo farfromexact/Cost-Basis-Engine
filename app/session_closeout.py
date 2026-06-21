@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Iterable
 
-from app.broker_import import BrokerImportReconciliationReport
+from app.broker_import import BrokerFillExportRow, BrokerImportReconciliationReport
 from app.manual_fills import ManualFill
 from app.session_risk import LiveSessionRiskUsageReport
 from core.models import Side
@@ -100,9 +100,12 @@ def build_session_closeout_report(
     broker_reconciliation: BrokerImportReconciliationReport,
     risk_usage: LiveSessionRiskUsageReport,
     session_date: str | None = None,
+    broker_fills: Iterable[BrokerFillExportRow] | None = None,
 ) -> SessionCloseoutReport:
     date_text = _date_text(str(session_date or risk_usage.session_date or ""))
-    fills = [fill for fill in manual_fills if fill.symbol == symbol and (not date_text or _date_text(fill.ts) == date_text)]
+    all_manual_fills = list(manual_fills)
+    broker_fill_rows = tuple(broker_fills) if broker_fills is not None else None
+    fills = [fill for fill in all_manual_fills if fill.symbol == symbol and (not date_text or _date_text(fill.ts) == date_text)]
     pair_rows = _pair_rows(fills)
     matched_manual_fill_ids = _matched_manual_fill_ids(broker_reconciliation)
     closed_pairs = [row for row in pair_rows if row["closed"]]
@@ -112,6 +115,7 @@ def build_session_closeout_report(
     checks = (
         _manual_pair_check(len(fills), len(closed_pairs), len(open_pairs)),
         _broker_reconciliation_check(len(fills), broker_reconciliation),
+        _freshness_check(symbol, date_text, all_manual_fills, broker_reconciliation, broker_fill_rows),
         _inventory_restoration_check(net_delta, len(open_pairs), risk_usage.open_pair_count),
         _risk_breach_check(risk_usage),
     )
@@ -251,6 +255,76 @@ def _broker_reconciliation_check(manual_count: int, report: BrokerImportReconcil
         f"Broker reconciliation matched all {manual_count} manual fill(s).",
         "No action required.",
     )
+
+
+def _freshness_check(
+    symbol: str,
+    session_date: str,
+    manual_fills: list[ManualFill],
+    broker_reconciliation: BrokerImportReconciliationReport,
+    broker_fills: tuple[BrokerFillExportRow, ...] | None,
+) -> SessionCloseoutCheck:
+    if not session_date:
+        return SessionCloseoutCheck(
+            "fill_freshness",
+            "WARN",
+            "Session date is unavailable, so manual-fill and broker-export freshness cannot be verified.",
+            "Supply the session date before final closeout signoff.",
+        )
+    manual_dates = [_date_text(fill.ts) for fill in manual_fills if fill.symbol == symbol and _date_text(fill.ts)]
+    broker_dates = _broker_fill_dates(symbol, broker_reconciliation, broker_fills)
+    manual_session_count = sum(1 for date in manual_dates if date == session_date)
+    broker_session_count = sum(1 for date in broker_dates if date == session_date)
+    warnings: list[str] = []
+    _append_staleness_warning(warnings, "manual fills", manual_dates, manual_session_count, session_date)
+    _append_staleness_warning(warnings, "broker export", broker_dates, broker_session_count, session_date)
+    if warnings:
+        return SessionCloseoutCheck(
+            "fill_freshness",
+            "WARN",
+            "; ".join(warnings),
+            "Load or record session-date manual fills and broker export rows before final EOD signoff.",
+        )
+    return SessionCloseoutCheck(
+        "fill_freshness",
+        "OK",
+        (
+            f"Freshness checked for session {session_date}: manual session rows={manual_session_count}, "
+            f"broker session rows={broker_session_count}."
+        ),
+        "No action required.",
+    )
+
+
+def _broker_fill_dates(
+    symbol: str,
+    broker_reconciliation: BrokerImportReconciliationReport,
+    broker_fills: tuple[BrokerFillExportRow, ...] | None,
+) -> list[str]:
+    if broker_fills is not None:
+        return [_date_text(fill.ts) for fill in broker_fills if fill.symbol == symbol and _date_text(fill.ts)]
+    return [
+        _date_text(item.ts)
+        for item in broker_reconciliation.items
+        if item.symbol == symbol and item.broker_fill_id and _date_text(item.ts)
+    ]
+
+
+def _append_staleness_warning(
+    warnings: list[str],
+    label: str,
+    dates: list[str],
+    session_count: int,
+    session_date: str,
+) -> None:
+    if not dates:
+        return
+    latest = max(dates)
+    future_count = sum(1 for date in dates if date > session_date)
+    if future_count:
+        warnings.append(f"{label} include {future_count} future-dated row(s) after session {session_date}")
+    elif session_count == 0 and latest < session_date:
+        warnings.append(f"{label} latest date is {latest}; no rows for session {session_date}")
 
 
 def _inventory_restoration_check(net_delta: int, open_pair_count: int, risk_open_pair_count: int) -> SessionCloseoutCheck:

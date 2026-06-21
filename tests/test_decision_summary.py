@@ -18,6 +18,9 @@ def test_decision_summary_separates_executable_trigger_sections() -> None:
     assert set(summary.as_dict()) == {"recommendation", "evidence", "invalidation", "position_impact", "caveats"}
     assert any("Action: Trigger S->B" in row for row in summary.recommendation)
     assert any("Deviation score" in row for row in summary.evidence)
+    assert any("Round-trip cost" in row for row in summary.evidence)
+    assert any("Net edge after cost" in row for row in summary.evidence)
+    assert any("Required edge buffer" in row for row in summary.evidence)
     assert any("Invalidation price" in row for row in summary.invalidation)
     assert any("Inventory delta after first leg: -100 shares" in row for row in summary.position_impact)
     assert any("not realized until both legs close" in row for row in summary.caveats)
@@ -46,6 +49,7 @@ def _engine() -> TriggerEngine:
             sb_watch_deviation=0.002,
             bs_trigger_deviation=-0.003,
             bs_watch_deviation=-0.002,
+            max_t_ratio=0.10,
             risk_buffer_pct=0.0,
             min_amount_ratio=1.0,
             trend_day_return_pct=0.02,

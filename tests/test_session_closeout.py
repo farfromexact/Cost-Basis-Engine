@@ -22,6 +22,7 @@ def test_session_closeout_counts_reduction_only_after_all_gates_pass() -> None:
     assert report.open_pair_count == 0
     assert report.net_position_delta_qty == 0
     assert report.countable_cost_basis_reduction == 17.0
+    assert any(check.check == "fill_freshness" and check.status == "OK" for check in report.checks)
 
 
 def test_session_closeout_blocks_when_broker_reconciliation_is_missing() -> None:
@@ -68,6 +69,26 @@ def test_session_closeout_no_fills_has_no_countable_reduction() -> None:
     assert report.countable_cost_basis_reduction == 0.0
 
 
+def test_session_closeout_warns_when_manual_and_broker_rows_are_stale_for_session() -> None:
+    pair_id = manual_pair_id("603236", "SB", 10.0, 100)
+    fills = [
+        make_manual_fill("603236", pair_id, "SELL", 100, 10.0, ts="2026-06-19 10:00:00"),
+        make_manual_fill("603236", pair_id, "BUY", 100, 9.8, ts="2026-06-19 10:20:00"),
+    ]
+    broker = [_broker_from_manual(fill, f"bf{idx}") for idx, fill in enumerate(fills)]
+    reconciliation = reconcile_manual_fills_with_broker_export(fills, broker, symbol="603236")
+    risk = build_live_session_risk_usage_report("603236", [], 10000, 10.0, "balanced", "2026-06-20", "2026-06-20 15:00:00")
+
+    report = build_session_closeout_report("603236", fills, reconciliation, risk, "2026-06-20", broker_fills=broker)
+
+    assert report.status == "WARN"
+    assert report.countable is False
+    freshness = next(check for check in report.checks if check.check == "fill_freshness")
+    assert freshness.status == "WARN"
+    assert "manual fills latest date is 2026-06-19" in freshness.detail
+    assert "broker export latest date is 2026-06-19" in freshness.detail
+
+
 def _broker_from_manual(fill, broker_fill_id: str) -> BrokerFillExportRow:
     return BrokerFillExportRow(
         broker_fill_id=broker_fill_id,
@@ -92,7 +113,7 @@ def test_session_closeout_attributes_each_pair_broker_match_and_net_cash() -> No
     reconciliation = reconcile_manual_fills_with_broker_export(fills, broker, symbol="603236")
     risk = build_live_session_risk_usage_report("603236", fills, 10000, 10.0, "balanced", "2026-06-20", "2026-06-20 15:00:00")
 
-    report = build_session_closeout_report("603236", fills, reconciliation, risk, "2026-06-20")
+    report = build_session_closeout_report("603236", fills, reconciliation, risk, "2026-06-20", broker_fills=broker)
     by_pair = {pair.pair_id: pair for pair in report.pair_attributions}
 
     assert by_pair[closed_pair].buy_qty == 100

@@ -1,5 +1,96 @@
 # Decisions
 
+## 2026-06-21 - Stop intraday embellishment after debug-field closeout
+
+- Decision: Keep `deviation_bps` only as a compatibility alias for existing VWAP deviation bps.
+- Decision: Do not continue adding new intraday UI/detail features in this pass.
+- Rationale: The simplified intraday logic is the useful part; additional detail risks making the app noisy again.
+- Consequence: The remaining work is review and baseline governance, not more live-page embellishment.
+
+## 2026-06-21 - Sellability belongs in the primary decision card
+
+- Decision: `TradeIntent` JSON exposes inventory feasibility, sellable-after, inventory delta, and capital required as top-level fields.
+- Decision: Dashboard top decision card shows those same inventory metrics.
+- Rationale: A suggested T action is not operationally meaningful unless the operator can immediately see sellable/capital feasibility.
+- Consequence: A-share T+1 and cash constraints are easier to audit, but broker-confirmed account state remains outside the model until explicitly reconciled.
+
+## 2026-06-21 - Show the bps hurdle where the decision is made
+
+- Decision: `TradeIntent` JSON exposes round-trip cost bps, net edge bps, and required edge-buffer bps as top-level fields.
+- Decision: Dashboard and decision summary show cost/net/buffer bps near the main trading decision.
+- Rationale: A professional operator needs to know not only the action label, but also whether the signal clears costs by enough margin.
+- Consequence: Decision output is more auditable, while execution, fills, realized PnL, and baseline updates remain separate workflows.
+
+## 2026-06-21 - Custom fee inputs should show their bps hurdle
+
+- Decision: Dashboard custom fee mode displays a market-aware round-trip cost and break-even bps preview.
+- Decision: The preview uses the same `FeeModel` methods as trigger cost gating.
+- Rationale: Operators should not have to infer whether a custom fee schedule materially changes the minimum required edge.
+- Consequence: Fee assumptions become more auditable, but the preview remains an assumption check rather than broker-confirmed cost evidence.
+
+## 2026-06-21 - Custom fee config must expose market-specific cost fields
+
+- Decision: CLI custom fee configuration includes A-share official fee bps, A-share broker commission/minimum, US SEC fee, US FINRA TAF, US broker commission/minimum, and US platform fee.
+- Decision: Dashboard custom fee mode shows market-specific fields and preserves the selected market identity.
+- Rationale: Entry gating uses market-aware round-trip cost, so operator-configured costs must not collapse back to a generic fee shape.
+- Consequence: Users can align fee assumptions closer to their broker schedule, but the app still treats those inputs as operator-provided assumptions rather than verified brokerage truth.
+
+## 2026-06-21 - Audit REVIEW is a human gate, not an automatic baseline update
+
+- Decision: `ModelChangeAuditReport` includes `review_guidance` explaining whether no baseline update is needed or whether locked-OOS drift requires human review.
+- Decision: Dashboard displays review guidance when audit status is `REVIEW`.
+- Decision: Custom dashboard fee configs preserve the selected market key.
+- Rationale: After model semantics change, audit drift is expected, but it must not be interpreted as proof of improvement or silently promoted into a new baseline.
+- Consequence: The stored locked baseline remains unchanged until the explicit review-token workflow is used; US custom fee configs keep US-specific fee routing.
+
+## 2026-06-21 - Live execution language is simple; diagnostics stay behind it
+
+- Decision: The operator-facing lifecycle is `NO_TRADE`, `WATCH`, `ENTER`, `EXIT`, and `ABORT`.
+- Decision: Main chart markers show enter/exit/abort events only; richer `PROBE`, `ADD`, `CONFIRM`, `CLOSE_READY`, `BLOCKED`, and `EXPIRED` states remain debug details.
+- Decision: Auto ADD is disabled by default and one leg per side is the default live posture.
+- Decision: Entry eligibility must clear market-aware true round-trip cost plus a 5 bps edge buffer.
+- Decision: A-share and US fee assumptions use explicit market components instead of one generic fee shape.
+- Rationale: Professional use needs fast, unambiguous action language and conservative cost gates; detailed diagnostics are still valuable, but not as the primary execution state.
+- Consequence: Locked model-audit metrics can drift versus the previous stored baseline. That drift is a review prompt, not a profitability claim or an automatic reason to update the baseline.
+
+## 2026-06-21 - US market support is explicit, not a Korea/Yahoo alias
+
+- Decision: US stock support uses a distinct `US / Yahoo Finance` market source and CLI source `us_yahoo`.
+- Decision: US rules use 1-share lot size and regular-session times of 09:30 open, 15:35 latest open, 15:50 force-restore, and 16:00 close; ordinary A-share/Korea price-limit assumptions are not applied.
+- Decision: US defaults use a separate `us_prototype_conservative` fee profile and US-specific source caveats.
+- Rationale: The same Yahoo adapter can fetch multiple exchanges, but market mechanics must remain explicit so the dashboard does not silently apply A-share T+1, Korea price limits, or A-share fee assumptions to US stocks.
+- Consequence: US support is available for prototype intraday decision support, but it remains unbrokered and cannot support profitability, execution, settlement, FX, or account-state claims.
+
+## 2026-06-21 - Ledger separates countable and non-countable cash
+
+- Decision: The session ledger is derived from `SessionCloseoutReport`, not from raw fills independently.
+- Decision: `realized_countable_reduction` only uses closeout-approved countable reduction; blocked pair net cash stays non-countable even when positive.
+- Decision: no-action days get an explicit row rather than being mixed with zero-result trading days.
+- Rationale: Users need accounting clarity without bypassing closeout gates.
+- Consequence: CLI/dashboard now show ledger summary fields, but execution, fills, restored inventory, broker matching, and fees/slippage remain governed by closeout.
+
+## 2026-06-21 - Closeout requires fresh session evidence
+
+- Decision: Closeout includes a `fill_freshness` check comparing manual-fill and broker-export row dates with the selected session date.
+- Decision: Stale evidence produces WARN and prevents countable closeout reduction unless all other gates are OK and fresh session rows exist.
+- Rationale: A broker export or manual-fill file can exist but still describe an older session; final EOD review must not silently rely on stale evidence.
+- Consequence: EOD review inherits closeout freshness warnings and asks the operator to load or record session-date evidence before final signoff.
+
+## 2026-06-21 - Multi-leg lifecycle adds are explicitly bounded
+
+- Decision: Same-side lifecycle ADD markers require max-leg room, total T position-cap room, minimum minutes since the prior leg, and required price improvement versus the prior leg.
+- Decision: A same-side trigger that crosses invalidation but fails an add bound should be marked blocked with the failed add constraint in the reason.
+- Rationale: Averaging into the same side without visible bounds is not professional decision support; the operator needs to know both why an add is allowed and why it is not.
+- Consequence: Lifecycle ADD remains signal-only and cumulative quantity is diagnostic; execution, broker fills, restored inventory, and countable cost-basis reduction remain separate workflows.
+
+## 2026-06-21 - B->S down-regime gating is asymmetric
+
+- Decision: B->S in `WEAK_DOWN` can be allowed only as reduced-size probe after side-specific trigger and exhaustion checks pass.
+- Decision: B->S in `STRONG_TREND_DOWN` requires a higher regime-adjusted deviation score and strong downside exhaustion before it can move from watch to trigger.
+- Decision: B->S in `CRASH_DOWN` remains blocked rather than mechanically adding into weakness.
+- Rationale: Long-holder T logic should distinguish repairable below-VWAP deviations from trend-following downside or crash conditions.
+- Consequence: B->S triggers become more selective and can be smaller than the configured base T size; this changes guidance semantics only, not execution, fills, or countable cost-basis accounting.
+
 ## 2026-06-20 - Lifecycle markers use staged diagnostic states
 
 - Decision: Chart lifecycle markers should not use generic `OPEN`; they should distinguish `WATCH`, `PROBE`, `ADD`, `CONFIRM`, `CLOSE_READY`, `FORCED_DECISION`, `BLOCKED`, and `EXPIRED`.

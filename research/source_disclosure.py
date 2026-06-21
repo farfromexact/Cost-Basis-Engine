@@ -41,6 +41,46 @@ class DataSourceDisclosure:
 
 
 def build_data_source_disclosure(market_source: str) -> DataSourceDisclosure:
+    if market_source.startswith("US"):
+        return DataSourceDisclosure(
+            source_name="Yahoo Finance public chart feed",
+            source_grade="research/prototype feed",
+            broker_confirmed=False,
+            delay_status="unverified delay and possible revisions",
+            licensing_status="public-finance terms; operational redistribution not verified",
+            items=(
+                SourceDisclosureItem(
+                    topic="Delay",
+                    status="WARN",
+                    detail="Minute bars may be delayed, corrected, or missing the current forming bar; they are not exchange-direct broker data.",
+                    operator_action="Confirm the latest bid/ask and tradable price in the broker before acting.",
+                ),
+                SourceDisclosureItem(
+                    topic="Licensing",
+                    status="WARN",
+                    detail="Yahoo Finance data is suitable here only as a research/prototype input; trading-desk or redistribution rights are not established.",
+                    operator_action="Use a licensed market-data source before relying on this app in a professional workflow.",
+                ),
+                SourceDisclosureItem(
+                    topic="Turnover amount",
+                    status="WARN",
+                    detail="US/Yahoo turnover is approximated from close * volume, so amount-ratio liquidity checks are lower confidence.",
+                    operator_action="Downgrade signal confidence when liquidity confirmation depends on turnover amount.",
+                ),
+                SourceDisclosureItem(
+                    topic="US market mechanics",
+                    status="REQUIRED",
+                    detail="The app does not model broker-specific margin, cash-settlement, locate, trading halt, or order-routing constraints.",
+                    operator_action="Confirm account permissions, settled cash/margin, and live venue state in the broker before treating any trigger as actionable.",
+                ),
+                SourceDisclosureItem(
+                    topic="Broker confirmation",
+                    status="REQUIRED",
+                    detail="The app does not verify account holdings, order acceptance, partial fills, cancels, or settlement state.",
+                    operator_action="Use broker-confirmed holdings and executions as the source of truth.",
+                ),
+            ),
+        )
     if market_source.startswith("Korea"):
         return DataSourceDisclosure(
             source_name="Yahoo Finance public chart feed",

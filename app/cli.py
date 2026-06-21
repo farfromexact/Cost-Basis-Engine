@@ -24,6 +24,7 @@ from app.notifications import NotificationConfig, Notifier, format_prompt_notifi
 from app.order_ticket import build_pre_trade_order_ticket
 from app.post_trade_review import build_post_trade_review_report
 from app.session_closeout import build_session_closeout_report
+from app.session_ledger import build_session_ledger_summary
 from app.session_risk import build_live_session_risk_usage_report
 from app.position_reconciliation import (
     BrokerPositionSnapshot,
@@ -184,7 +185,7 @@ def main() -> None:
     trigger_parser.add_argument("--scenario", default="mean_revert")
     trigger_parser.add_argument("--csv")
     trigger_parser.add_argument("--symbol")
-    trigger_parser.add_argument("--data-source", choices=["eastmoney", "yahoo"], default=None)
+    trigger_parser.add_argument("--data-source", choices=["eastmoney", "yahoo", "us_yahoo"], default=None)
     trigger_parser.add_argument("--held-qty", type=int)
     trigger_parser.add_argument("--settled-sellable-qty", type=int)
     trigger_parser.add_argument("--purchasable-qty", type=int)
@@ -418,13 +419,16 @@ def main() -> None:
             broker_reconciliation=broker_reconciliation,
             risk_usage=risk_usage,
             session_date=bars[-1].ts if bars else None,
+            broker_fills=broker_fills,
         )
+        session_ledger = build_session_ledger_summary(session_closeout)
         payload["pre_trade_order_ticket"] = ticket.as_dict()
         payload["execution_sensitivity"] = sensitivity_report.as_dict()
         payload["post_trade_review"] = post_trade_review.as_dict()
         payload["broker_fill_reconciliation"] = broker_reconciliation.as_dict()
         payload["live_session_risk_usage"] = risk_usage.as_dict()
         payload["session_closeout"] = session_closeout.as_dict()
+        payload["session_ledger"] = session_ledger.as_dict()
         journal_path = save_execution_journal_report(execution_journal)
         recent_journals = load_execution_journal_records(symbol=execution_journal.symbol, limit=5)
         end_of_day_review = build_end_of_day_review_report(session_closeout, recent_journals)
@@ -600,6 +604,18 @@ def _add_fee_args(parser) -> None:
     parser.add_argument("--other-fee-rate", type=float, default=0.0)
     parser.add_argument("--buy-slippage-rate", type=float, default=0.0001)
     parser.add_argument("--sell-slippage-rate", type=float, default=0.0001)
+    parser.add_argument("--a-share-handling-fee-bps", type=float, default=0.341)
+    parser.add_argument("--a-share-management-fee-bps", type=float, default=0.200)
+    parser.add_argument("--a-share-transfer-fee-bps", type=float, default=0.100)
+    parser.add_argument("--a-share-stamp-duty-sell-bps", type=float, default=5.000)
+    parser.add_argument("--a-share-broker-commission-bps", type=float, default=1.0)
+    parser.add_argument("--a-share-min-commission-cny", type=float, default=5.0)
+    parser.add_argument("--us-sec-fee-per-million", type=float, default=20.60)
+    parser.add_argument("--us-finra-taf-per-share", type=float, default=0.000195)
+    parser.add_argument("--us-finra-taf-cap-per-trade", type=float, default=9.79)
+    parser.add_argument("--us-broker-commission-per-share", type=float, default=0.0)
+    parser.add_argument("--us-broker-min-commission", type=float, default=0.0)
+    parser.add_argument("--us-platform-fee-per-order", type=float, default=0.0)
 
 
 def _add_prompt_args(parser) -> None:
@@ -686,7 +702,7 @@ def _load_bars_from_args(args):
     if args.csv:
         return load_minute_csv(args.csv)
     if args.symbol:
-        if _data_source_from_args(args) == "yahoo":
+        if _is_yahoo_data_source(args):
             return fetch_yahoo_intraday_bars(args.symbol)
         return fetch_intraday_minute_bars(args.symbol)
     return get_scenario(args.scenario)
@@ -694,7 +710,7 @@ def _load_bars_from_args(args):
 
 def _manual_fill_symbol_from_args(args) -> str:
     if getattr(args, "symbol", None):
-        if _data_source_from_args(args) == "yahoo":
+        if _is_yahoo_data_source(args):
             return normalize_yahoo_symbol(args.symbol)
         return args.symbol
     return _data_label(args)
@@ -705,7 +721,7 @@ def _data_label(args) -> str:
     if args.csv:
         return args.csv
     if args.symbol:
-        if _data_source_from_args(args) == "yahoo":
+        if _is_yahoo_data_source(args):
             return f"yahoo:{normalize_yahoo_symbol(args.symbol)}"
         return f"eastmoney:{args.symbol}"
     return f"scenario:{args.scenario}"
@@ -716,11 +732,15 @@ def _data_source_from_args(args) -> str:
 
 
 def _data_source_from_snapshot(snapshot: PositionSnapshot) -> str:
-    return "yahoo" if snapshot.market_source.startswith("Korea") else "eastmoney"
+    if snapshot.market_source.startswith("Korea"):
+        return "yahoo"
+    if snapshot.market_source.startswith("US"):
+        return "us_yahoo"
+    return "eastmoney"
 
 
 def _rules_config_from_args(args) -> RulesConfig:
-    max_t_ratio = args.max_t_ratio if args.max_t_ratio is not None else 0.10
+    max_t_ratio = args.max_t_ratio if args.max_t_ratio is not None else 0.05
     max_single_trade_qty = getattr(args, "max_single_trade_qty", None)
     if _data_source_from_args(args) == "yahoo":
         base_rules = RulesConfig(
@@ -729,10 +749,24 @@ def _rules_config_from_args(args) -> RulesConfig:
             max_t_ratio=max_t_ratio,
             max_single_trade_qty=max_single_trade_qty,
             start_time="09:15",
+            no_new_trade_after="15:05",
             latest_open_time="15:05",
             force_restore_time="15:20",
             close_time="15:30",
             price_limit_pct=0.30,
+        )
+    elif _data_source_from_args(args) == "us_yahoo":
+        base_rules = RulesConfig(
+            lot_size=1,
+            minimum_order_qty=1,
+            max_t_ratio=max_t_ratio,
+            max_single_trade_qty=max_single_trade_qty,
+            start_time="09:30",
+            no_new_trade_after="15:35",
+            latest_open_time="15:35",
+            force_restore_time="15:50",
+            close_time="16:00",
+            price_limit_pct=1.00,
         )
     else:
         base_rules = RulesConfig(max_t_ratio=max_t_ratio, max_single_trade_qty=max_single_trade_qty)
@@ -743,6 +777,7 @@ def _rules_config_from_args(args) -> RulesConfig:
 def _fee_config_from_args(args) -> FeeConfig:
     profile_id = _fee_profile_id_from_args(args)
     custom_config = FeeConfig(
+        market=_fee_market_key_from_args(args),
         buy_commission_rate=getattr(args, "buy_commission_rate", 0.00025),
         sell_commission_rate=getattr(args, "sell_commission_rate", 0.00025),
         min_commission=getattr(args, "min_commission", 5.0),
@@ -751,6 +786,18 @@ def _fee_config_from_args(args) -> FeeConfig:
         other_fee_rate=getattr(args, "other_fee_rate", 0.0),
         buy_slippage_rate=getattr(args, "buy_slippage_rate", 0.0001),
         sell_slippage_rate=getattr(args, "sell_slippage_rate", 0.0001),
+        a_share_handling_fee_bps=getattr(args, "a_share_handling_fee_bps", 0.341),
+        a_share_management_fee_bps=getattr(args, "a_share_management_fee_bps", 0.200),
+        a_share_transfer_fee_bps=getattr(args, "a_share_transfer_fee_bps", 0.100),
+        a_share_stamp_duty_sell_bps=getattr(args, "a_share_stamp_duty_sell_bps", 5.000),
+        a_share_broker_commission_bps=getattr(args, "a_share_broker_commission_bps", 1.0),
+        a_share_min_commission_cny=getattr(args, "a_share_min_commission_cny", 5.0),
+        us_sec_fee_per_million=getattr(args, "us_sec_fee_per_million", 20.60),
+        us_finra_taf_per_share=getattr(args, "us_finra_taf_per_share", 0.000195),
+        us_finra_taf_cap_per_trade=getattr(args, "us_finra_taf_cap_per_trade", 9.79),
+        us_broker_commission_per_share=getattr(args, "us_broker_commission_per_share", 0.0),
+        us_broker_min_commission=getattr(args, "us_broker_min_commission", 0.0),
+        us_platform_fee_per_order=getattr(args, "us_platform_fee_per_order", 0.0),
     )
     return fee_config_from_profile(profile_id, custom_config=custom_config, market_source=_market_source_from_args(args))
 def _fee_profile_id_from_args(args) -> str:
@@ -760,7 +807,25 @@ def _fee_profile_id_from_args(args) -> str:
 
 
 def _market_source_from_args(args) -> str:
-    return "Korea / Yahoo Finance" if _data_source_from_args(args) == "yahoo" else "A-share / Eastmoney"
+    data_source = _data_source_from_args(args)
+    if data_source == "yahoo":
+        return "Korea / Yahoo Finance"
+    if data_source == "us_yahoo":
+        return "US / Yahoo Finance"
+    return "A-share / Eastmoney"
+
+
+def _is_yahoo_data_source(args) -> bool:
+    return _data_source_from_args(args) in {"yahoo", "us_yahoo"}
+
+
+def _fee_market_key_from_args(args) -> str:
+    market_source = _market_source_from_args(args)
+    if market_source.startswith("US"):
+        return "US_EQUITY"
+    if market_source.startswith("A-share"):
+        return "A_SHARE"
+    return "GENERIC"
 
 
 if __name__ == "__main__":

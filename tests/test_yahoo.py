@@ -13,6 +13,12 @@ def test_normalize_yahoo_symbol_for_samsung_aliases() -> None:
     assert normalize_yahoo_symbol("三星优先股") == "005935.KS"
 
 
+def test_normalize_yahoo_symbol_keeps_us_tickers() -> None:
+    assert normalize_yahoo_symbol("aapl") == "AAPL"
+    assert normalize_yahoo_symbol(" MSFT ") == "MSFT"
+    assert normalize_yahoo_symbol("BRK-B") == "BRK-B"
+
+
 def test_parse_yahoo_chart_payload() -> None:
     first = int(datetime(2026, 6, 19, 9, 0, tzinfo=ZoneInfo("Asia/Seoul")).timestamp())
     second = int(datetime(2026, 6, 19, 9, 1, tzinfo=ZoneInfo("Asia/Seoul")).timestamp())

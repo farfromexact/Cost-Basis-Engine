@@ -7,6 +7,7 @@ from core.fee_model import FeeConfig, FeeModel
 
 DEFAULT_A_SHARE_FEE_PROFILE_ID = "a_share_conservative"
 DEFAULT_KOREA_FEE_PROFILE_ID = "korea_prototype_conservative"
+DEFAULT_US_FEE_PROFILE_ID = "us_prototype_conservative"
 ZERO_FEE_PROFILE_ID = "zero_fee_research"
 CUSTOM_FEE_PROFILE_ID = "custom_manual"
 
@@ -30,6 +31,7 @@ class FeeProfile:
 
 
 ZERO_FEE_CONFIG = FeeConfig(
+    market="GENERIC",
     buy_commission_rate=0.0,
     sell_commission_rate=0.0,
     min_commission=0.0,
@@ -38,26 +40,41 @@ ZERO_FEE_CONFIG = FeeConfig(
     other_fee_rate=0.0,
     buy_slippage_rate=0.0,
     sell_slippage_rate=0.0,
+    a_share_handling_fee_bps=0.0,
+    a_share_management_fee_bps=0.0,
+    a_share_transfer_fee_bps=0.0,
+    a_share_stamp_duty_sell_bps=0.0,
+    a_share_broker_commission_bps=0.0,
+    a_share_min_commission_cny=0.0,
+    us_sec_fee_per_million=0.0,
+    us_finra_taf_per_share=0.0,
+    us_finra_taf_cap_per_trade=0.0,
+    us_broker_commission_per_share=0.0,
+    us_broker_min_commission=0.0,
+    us_platform_fee_per_order=0.0,
 )
 
 FEE_PROFILES: dict[str, FeeProfile] = {
     DEFAULT_A_SHARE_FEE_PROFILE_ID: FeeProfile(
         profile_id=DEFAULT_A_SHARE_FEE_PROFILE_ID,
         label="A-share conservative default",
-        description="Default costed A-share research profile; confirm broker-specific rates before live use.",
-        config=FeeConfig(),
+        description="Default costed A-share profile using official fees plus configurable broker commission; confirm broker-specific rates before live use.",
+        config=FeeConfig(
+            market="A_SHARE",
+            buy_slippage_rate=0.0001,
+            sell_slippage_rate=0.0001,
+            a_share_broker_commission_bps=1.0,
+            a_share_min_commission_cny=5.0,
+        ),
     ),
     "a_share_low_cost": FeeProfile(
         profile_id="a_share_low_cost",
         label="A-share low-cost broker",
         description="Lower commission/slippage preset for sensitivity checks; still requires broker confirmation.",
         config=FeeConfig(
-            buy_commission_rate=0.00015,
-            sell_commission_rate=0.00015,
-            min_commission=5.0,
-            stamp_tax_rate=0.0005,
-            transfer_fee_rate=0.00001,
-            other_fee_rate=0.0,
+            market="A_SHARE",
+            a_share_broker_commission_bps=0.8,
+            a_share_min_commission_cny=5.0,
             buy_slippage_rate=0.00005,
             sell_slippage_rate=0.00005,
         ),
@@ -67,6 +84,7 @@ FEE_PROFILES: dict[str, FeeProfile] = {
         label="Korea conservative prototype",
         description="Prototype Korea stock cost profile; verify current broker fees/taxes before relying on it.",
         config=FeeConfig(
+            market="GENERIC",
             buy_commission_rate=0.00015,
             sell_commission_rate=0.00015,
             min_commission=0.0,
@@ -75,6 +93,25 @@ FEE_PROFILES: dict[str, FeeProfile] = {
             other_fee_rate=0.0,
             buy_slippage_rate=0.00010,
             sell_slippage_rate=0.00010,
+        ),
+    ),
+    DEFAULT_US_FEE_PROFILE_ID: FeeProfile(
+        profile_id=DEFAULT_US_FEE_PROFILE_ID,
+        label="US stock conservative prototype",
+        description="Prototype US stock cost profile; verify broker commissions, SEC/FINRA fees, FX, and settlement rules before live use.",
+        config=FeeConfig(
+            market="US_EQUITY",
+            buy_commission_rate=0.0,
+            sell_commission_rate=0.0,
+            min_commission=0.0,
+            stamp_tax_rate=0.0,
+            transfer_fee_rate=0.0,
+            other_fee_rate=0.0,
+            buy_slippage_rate=0.00010,
+            sell_slippage_rate=0.00010,
+            us_broker_commission_per_share=0.0,
+            us_broker_min_commission=0.0,
+            us_platform_fee_per_order=0.0,
         ),
     ),
     ZERO_FEE_PROFILE_ID: FeeProfile(
@@ -88,15 +125,18 @@ FEE_PROFILES: dict[str, FeeProfile] = {
 
 
 def default_fee_profile_id(market_source: str | None = None) -> str:
-    if str(market_source or "").startswith("Korea"):
+    source = str(market_source or "")
+    if source.startswith("Korea"):
         return DEFAULT_KOREA_FEE_PROFILE_ID
+    if source.startswith("US"):
+        return DEFAULT_US_FEE_PROFILE_ID
     return DEFAULT_A_SHARE_FEE_PROFILE_ID
 
 
 def fee_profile_choices(market_source: str | None = None) -> list[str]:
     preferred = default_fee_profile_id(market_source)
     ordered = [preferred]
-    for profile_id in (DEFAULT_A_SHARE_FEE_PROFILE_ID, "a_share_low_cost", DEFAULT_KOREA_FEE_PROFILE_ID, ZERO_FEE_PROFILE_ID, CUSTOM_FEE_PROFILE_ID):
+    for profile_id in (DEFAULT_A_SHARE_FEE_PROFILE_ID, "a_share_low_cost", DEFAULT_KOREA_FEE_PROFILE_ID, DEFAULT_US_FEE_PROFILE_ID, ZERO_FEE_PROFILE_ID, CUSTOM_FEE_PROFILE_ID):
         if profile_id not in ordered:
             ordered.append(profile_id)
     return ordered

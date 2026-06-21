@@ -46,6 +46,19 @@ def test_data_quality_flags_yahoo_turnover_approximation() -> None:
     assert any("approximated" in caveat for caveat in report.caveats)
 
 
+def test_data_quality_flags_us_yahoo_turnover_approximation() -> None:
+    bars = _bars(count=40, latest=datetime(2026, 6, 19, 10, 0), amount_offset=0.0)
+
+    report = build_data_quality_report(
+        bars,
+        market_source="US / Yahoo Finance",
+        now=datetime(2026, 6, 19, 10, 0),
+    )
+
+    assert report.status == "WARN"
+    assert any(check.name == "amount_quality" and check.status == "WARN" for check in report.checks)
+
+
 def test_data_quality_passes_recent_dense_exchange_turnover() -> None:
     bars = _bars(count=40, latest=datetime(2026, 6, 19, 10, 0), amount_offset=0.02)
 

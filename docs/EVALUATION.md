@@ -1,5 +1,128 @@
 # Evaluation
 
+## Debug-Field Alias Closeout
+
+Validation scope:
+
+- Lifecycle events expose `deviation_bps` as an alias for `vwap_deviation_bps`.
+- Signal details can include `deviation_bps`.
+- Focused validation: `python -m py_compile research\opportunity_lifecycle.py app\dashboard.py tests\test_opportunity_lifecycle.py tests\test_dashboard_signals.py`; `python -m pytest tests\test_opportunity_lifecycle.py tests\test_dashboard_signals.py -q -p no:cacheprovider --basetemp=.runtime\pytest-tmp-debug-fields-alias` (17 passed).
+- This is debug/export naming only; it does not alter trigger thresholds, sizing, fees, fills, or cost-basis accounting.
+
+## Inventory and Sellability Top-Level Decision Exposure
+
+Validation scope:
+
+- `TradeIntent.as_dict()` exposes top-level `inventory_ok`, `sellable_after_trade`, `inventory_delta_after_trade`, and `capital_required`.
+- Dashboard compact decision payload shows inventory OK, sellable-after, inventory delta, and capital required.
+- Focused validation: `python -m py_compile research\trigger_engine.py app\dashboard.py app\ui_text.py tests\test_trigger_engine.py tests\test_dashboard_signals.py`; `python -m pytest tests\test_trigger_engine.py::test_sell_to_buy_triggers_when_regime_deviation_and_inventory_pass tests\test_dashboard_signals.py -q -p no:cacheprovider --basetemp=.runtime\pytest-tmp-inventory-top-level` (11 passed).
+- This validates observability only; it does not change inventory gates, broker reconciliation, fills, or countable cost-basis reduction.
+
+## Decision-Path Cost and Edge Bps Exposure
+
+Validation scope:
+
+- `TradeIntent.as_dict()` exposes top-level `estimated_round_trip_cost_bps`, `net_edge_bps`, and `min_edge_buffer_bps`.
+- Decision summary evidence includes round-trip cost bps, net edge bps, and required edge buffer.
+- Dashboard top trading decision card shows round-trip cost bps and net edge bps.
+- Focused validation: `python -m py_compile research\trigger_engine.py research\decision_summary.py app\dashboard.py app\ui_text.py tests\test_trigger_engine.py tests\test_decision_summary.py tests\test_dashboard_signals.py`; `python -m pytest tests\test_trigger_engine.py::test_round_trip_edge_buffer_blocks_enter tests\test_decision_summary.py tests\test_dashboard_signals.py -q -p no:cacheprovider --basetemp=.runtime\pytest-tmp-edge-bps-display3` (12 passed).
+- This validates observability only; it does not alter trigger thresholds, route orders, infer fills, or count cost-basis reduction.
+
+## Custom Fee Break-Even Preview
+
+Validation scope:
+
+- Dashboard custom fee mode displays round-trip cost and break-even bps from the selected market `FeeModel`.
+- The preview uses user-entered preview price and share count and does not mutate fee profiles or trigger thresholds.
+- Focused validation: `python -m py_compile app\dashboard.py app\ui_text.py tests\test_dashboard_model_audit.py`; `python -m pytest tests\test_dashboard_model_audit.py::test_dashboard_custom_fee_config_preserves_market tests\test_fee_model.py tests\test_fee_profiles.py -q -p no:cacheprovider --basetemp=.runtime\pytest-tmp-fee-preview` (11 passed).
+- This validates display and cost-model plumbing only; it does not verify broker schedules, route orders, infer fills, or count cost-basis reduction.
+
+## Market-Specific Custom Fee Plumbing
+
+Validation scope:
+
+- CLI custom fee args expose A-share official bps/min-commission fields and US SEC/FINRA/broker/platform fields.
+- Dashboard custom fee config preserves `FeeConfig.market` and returns market-specific custom fields.
+- Focused validation: `python -m py_compile app\cli.py app\dashboard.py app\ui_text.py tests\test_cli.py tests\test_dashboard_model_audit.py tests\test_fee_model.py tests\test_fee_profiles.py`; `python -m pytest tests\test_cli.py::test_cli_fee_config_is_explicitly_configurable tests\test_cli.py::test_cli_us_custom_fee_components_are_configurable tests\test_cli.py::test_cli_default_fee_profile_is_costed_not_zero_fee tests\test_cli.py::test_cli_us_yahoo_uses_us_fee_profile_and_rules tests\test_dashboard_model_audit.py::test_dashboard_custom_fee_config_preserves_market tests\test_fee_model.py tests\test_fee_profiles.py -q -p no:cacheprovider --basetemp=.runtime\pytest-tmp-fee-config-plumbing` (15 passed).
+- This validates configuration plumbing only; it does not verify any live broker fee schedule, route orders, infer fills, or count cost-basis reduction.
+
+## Model-Audit Review Guidance and Custom-Fee Market Fix
+
+Validation scope:
+
+- `ModelChangeAuditReport.as_dict()` now includes `review_guidance`.
+- OK audit reports state that no baseline update is needed.
+- REVIEW audit reports state that baseline drift is a human review gate and not evidence of improvement.
+- Dashboard custom fee config preserves the selected `FeeConfig.market`, including `US_EQUITY`.
+- Focused validation: `python -m py_compile research\model_audit.py app\dashboard.py tests\test_model_audit.py tests\test_dashboard_model_audit.py`; `python -m pytest tests\test_model_audit.py tests\test_dashboard_model_audit.py -q -p no:cacheprovider --basetemp=.runtime\pytest-tmp-audit-guidance2` (8 passed).
+- This does not mutate the locked baseline, route orders, infer fills, realize PnL, or count cost-basis reduction.
+
+## Subtractive Intraday Execution Simplification
+
+Validation scope:
+
+- Main lifecycle output is collapsed to `NO_TRADE`, `WATCH`, `ENTER`, `EXIT`, and `ABORT`, with richer diagnostic states retained for detail tables/tooltips.
+- Main chart signal markers filter to enter/exit/abort events so watch/debug states do not dominate the price chart.
+- Default auto-add is disabled, default max T ratio is 5%, and no-new-pair cutoffs are explicit.
+- A-share fee modeling includes official handling/management/transfer, sell stamp duty, broker commission, minimum commission, and slippage assumptions.
+- US fee modeling includes SEC fee, FINRA TAF, optional broker/platform fees, and slippage assumptions.
+- Trigger entry gates use market-aware round-trip costs and a 5 bps net-edge buffer.
+- Focused validation passed for fee model/profiles, trigger engine, opportunity lifecycle, dashboard signal/risk rendering, order tickets, execution sensitivity, evaluation reports, model audit, and threshold experiments.
+- `python -m compileall .` exited 0, with existing inaccessible pytest/cache/temp directory listing warnings.
+- Full `python -m pytest -q` could not produce a clean final report in this Windows environment because pytest hit `PermissionError` while iterating its basetemp during session finish.
+- This changes signal semantics and cost gating only; it does not infer fills, route orders, realize PnL, or count cost-basis reduction.
+
+## US/Yahoo Market Module
+
+Validation scope:
+
+- Dashboard has a third `US / Yahoo Finance` market source with US ticker examples and 1-share lot defaults.
+- CLI trigger paths accept `--data-source us_yahoo`, map US persisted position snapshots back to `us_yahoo`, and select `US / Yahoo Finance` as the market source for fee/rule derivation.
+- US/Yahoo uses `us_prototype_conservative` rather than A-share or Korea defaults.
+- Source disclosure and data-quality checks keep Yahoo as a research/prototype feed with approximate turnover amount.
+- Focused validation: `python -m py_compile app\dashboard.py app\cli.py app\ui_text.py core\fee_profiles.py research\source_disclosure.py data\yahoo.py tests\test_yahoo.py tests\test_dashboard_risk_limits.py tests\test_fee_profiles.py tests\test_source_disclosure.py tests\test_data_quality.py tests\test_cli.py`; `python -m pytest tests\test_yahoo.py tests\test_dashboard_risk_limits.py tests\test_fee_profiles.py tests\test_source_disclosure.py tests\test_data_quality.py tests\test_cli.py::test_cli_us_yahoo_uses_us_fee_profile_and_rules tests\test_cli.py::test_cli_position_snapshot_maps_us_market_to_us_yahoo_source -q --basetemp=.runtime\pytest-tmp-us-yahoo -o cache_dir=.runtime\pytest-cache-us-yahoo` (29 passed; local pytest cache warnings only); `python -m app.cli trigger --scenario mean_revert --data-source us_yahoo --held-qty 100 --settled-sellable-qty 100 --purchasable-qty 10 --max-t-ratio 0.10 --risk-preset balanced --no-position-state` completed and selected `fee_profile=us_prototype_conservative`.
+- This does not validate live Yahoo availability for any specific US ticker and does not infer fills, route orders, model FX, claim profitability, or count cost-basis reduction.
+
+## Per-Session Ledger Summary
+
+Validation scope:
+
+- `app.session_ledger` derives realized/countable reduction, blocked pair net cash, and no-action-day rows from `SessionCloseoutReport`.
+- CLI trigger output includes `session_ledger`; dashboard exposes a session ledger panel/table.
+- Positive blocked pair cash remains non-countable until closeout gates pass.
+- This does not infer fills, route orders, realize PnL, or count cost-basis reduction outside closeout.
+- Focused validation: `python -m py_compile app\session_ledger.py app\session_closeout.py app\cli.py app\dashboard.py tests\test_session_ledger.py tests\test_dashboard_session_closeout.py tests\test_session_closeout.py tests\test_end_of_day_review.py`; `python -m pytest tests\test_session_ledger.py tests\test_dashboard_session_closeout.py tests\test_session_closeout.py tests\test_end_of_day_review.py -q --basetemp=.runtime\pytest-tmp-ledger-core -o cache_dir=.runtime\pytest-cache-ledger-core` (16 passed); `python -m app.cli trigger --scenario mean_revert --held-qty 10000 --settled-sellable-qty 10000 --purchasable-qty 10000 --max-t-ratio 0.10 --risk-preset defensive --ignore-fees --no-position-state` completed and emitted `session_ledger`. Local pytest cache warnings only.
+
+## Broker/Manual Fill Freshness Checks
+
+Validation scope:
+
+- Session closeout now includes a `fill_freshness` check for manual-fill and broker-export row dates versus the session date.
+- Stale rows produce WARN and are not counted as current-session closeout evidence.
+- End-of-day review surfaces closeout WARN status in its summary and rows.
+- This does not infer fills, route orders, realize PnL, or count cost-basis reduction from stale evidence.
+- Focused validation: `python -m py_compile app\session_closeout.py app\end_of_day_review.py app\cli.py app\dashboard.py tests\test_session_closeout.py tests\test_end_of_day_review.py tests\test_dashboard_session_closeout.py tests\test_dashboard_end_of_day_review.py`; `python -m pytest tests\test_session_closeout.py tests\test_end_of_day_review.py tests\test_dashboard_session_closeout.py tests\test_dashboard_end_of_day_review.py -q --basetemp=.runtime\pytest-tmp-freshness-core -o cache_dir=.runtime\pytest-cache-freshness-core` (13 passed); `python -m pytest tests\test_cli.py::test_cli_fee_config_is_explicitly_configurable tests\test_cli.py::test_cli_default_fee_profile_is_costed_not_zero_fee tests\test_cli.py::test_cli_zero_fee_requires_explicit_flag_or_profile -q --basetemp=.runtime\pytest-tmp-freshness-cli-basic -o cache_dir=.runtime\pytest-cache-freshness-cli-basic` (3 passed); `python -m app.cli trigger --scenario mean_revert --held-qty 10000 --settled-sellable-qty 10000 --purchasable-qty 10000 --max-t-ratio 0.10 --risk-preset defensive --ignore-fees --no-position-state` completed and emitted `fill_freshness`. Local pytest cache warnings only; full `tests\test_cli.py` combined run remains blocked by Windows `tmp_path` permission errors.
+
+## Bounded Multi-Leg Lifecycle State
+
+Validation scope:
+
+- Lifecycle ADD markers now require same-side trigger, max-leg room, total T cap room, minimum spacing, and minimum price improvement.
+- `OpportunityEvent` exposes `leg_count`, cumulative `total_suggested_qty`, `max_total_suggested_qty`, add price improvement, and minutes since the prior leg.
+- A same-side trigger that crosses invalidation but cannot add because of a bound is blocked with the failed constraint in the reason.
+- This does not infer fills, route orders, realize PnL, or count cost-basis reduction.
+- Focused validation: `python -m py_compile research\trigger_engine.py research\opportunity_lifecycle.py tests\test_opportunity_lifecycle.py tests\test_trigger_engine.py tests\test_dashboard_signals.py`; `python -m pytest tests\test_opportunity_lifecycle.py tests\test_trigger_engine.py tests\test_dashboard_signals.py -q --basetemp=pytest_tmp_bounded_multileg -o cache_dir=pytest_cache_bounded_multileg` (30 passed; local pytest cache warnings only).
+
+## Soft Down-Regime B/S Gating
+
+Validation scope:
+
+- `TriggerEngine` now emits down-regime profiles that distinguish weak-down, strong-down, and crash-down conditions.
+- B->S trigger eligibility uses side-specific deviation thresholds, regime trigger multipliers, and downside exhaustion requirements.
+- Weak/strong down B->S inventory sizing can be reduced by a regime multiplier before lot-size rounding.
+- This does not infer fills, route orders, realize PnL, or count cost-basis reduction.
+- Focused validation: `python -m py_compile research\trigger_engine.py research\opportunity_lifecycle.py app\dashboard.py tests\test_trigger_engine.py tests\test_opportunity_lifecycle.py tests\test_dashboard_signals.py`; `python -m pytest tests\test_trigger_engine.py tests\test_opportunity_lifecycle.py tests\test_dashboard_signals.py -q --basetemp=pytest_tmp_soft_regime -o cache_dir=pytest_cache_soft_regime` (28 passed; local pytest cache warnings only).
+
 ## B/S Lifecycle Diagnostics Stage 1
 
 Validation scope:

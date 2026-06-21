@@ -1,5 +1,171 @@
 # Loop State
 
+## 2026-06-21 - Debug-field alias closeout
+
+- current_baseline: lifecycle debug output included `vwap_deviation_bps`, while the subtractive-optimization spec named the debug field `deviation_bps`.
+- hypothesis: adding a compatibility alias completes the in-flight debug-table alignment without changing intraday logic.
+- expected_result: lifecycle event dictionaries include both `vwap_deviation_bps` and `deviation_bps`; dashboard signal details can display `deviation_bps`.
+- files_changed: `research/opportunity_lifecycle.py`, `app/dashboard.py`, tests, `TODO.md`, docs.
+- commands_run: `python -m py_compile research\opportunity_lifecycle.py app\dashboard.py tests\test_opportunity_lifecycle.py tests\test_dashboard_signals.py`; `python -m pytest tests\test_opportunity_lifecycle.py tests\test_dashboard_signals.py -q -p no:cacheprovider --basetemp=.runtime\pytest-tmp-debug-fields-alias`.
+- test_result: 17 passed.
+- metric_result: debug/export field naming only; no trigger, sizing, fee, baseline, fill, or accounting logic changed.
+- decision: KEEP as closeout only.
+- next_highest_value_question: stop adding intraday UI/detail features and review the simplified logic with the user.
+
+## 2026-06-21 - Inventory and sellability top-level decision exposure
+
+- current_baseline: inventory feasibility and A-share sellable-after state were present in nested `inventory_decision` and summary sections, but not visible in the top decision card or top-level JSON.
+- hypothesis: live decision support should show T+1/sellability and capital constraints next to the action label and quantity.
+- expected_result: `TradeIntent` JSON exposes top-level inventory feasibility fields; dashboard top trading decision shows inventory OK, sellable-after, inventory delta, and capital required.
+- files_changed: `research/trigger_engine.py`, `app/dashboard.py`, `app/ui_text.py`, tests, `TODO.md`, docs.
+- commands_run: `python -m py_compile research\trigger_engine.py app\dashboard.py app\ui_text.py tests\test_trigger_engine.py tests\test_dashboard_signals.py`; focused inventory visibility pytest.
+- test_result: 11 passed.
+- metric_result: display/JSON observability changed; inventory enforcement logic, fills, baseline, and accounting did not change.
+- observed_failure: a user could see a suggested action without immediate visibility into sellable capacity after the first leg.
+- decision: KEEP.
+- next_highest_value_question: should the dashboard add an explicit "why not earlier" compact row to the top decision card?
+- known_blockers: broker-confirmed holdings remain a separate manual/reconciliation workflow.
+
+## 2026-06-21 - Decision-path cost and edge bps exposure
+
+- current_baseline: trigger gating used round-trip cost bps, net edge bps, and an edge-buffer requirement, but the main decision card and JSON output did not expose these fields prominently.
+- hypothesis: professional users need to see the same bps hurdle used by the model when deciding whether an ENTER is actionable.
+- expected_result: `TradeIntent` JSON includes top-level bps fields, decision summary evidence shows cost/net/buffer bps, and the top dashboard decision card shows round-trip cost bps and net edge bps.
+- files_changed: `research/trigger_engine.py`, `research/decision_summary.py`, `app/dashboard.py`, `app/ui_text.py`, tests, `TODO.md`, docs.
+- commands_run: `python -m py_compile research\trigger_engine.py research\decision_summary.py app\dashboard.py app\ui_text.py tests\test_trigger_engine.py tests\test_decision_summary.py tests\test_dashboard_signals.py`; focused edge-bps display pytest.
+- test_result: 12 passed.
+- metric_result: display/JSON observability changed; trigger logic, fills, baseline, and accounting did not change.
+- observed_failure: users could see net money edge but not the bps cost hurdle driving WATCH versus ENTER.
+- decision: KEEP.
+- next_highest_value_question: should inventory T+1/sellable capacity fields get the same top-level JSON/card treatment?
+- known_blockers: edge bps is still model-estimated from public/prototype feed and user fee assumptions.
+
+## 2026-06-21 - Custom fee break-even preview
+
+- current_baseline: custom fee mode accepted detailed fee inputs, but the operator had to mentally translate those settings into the bps hurdle used by trigger gating.
+- hypothesis: showing round-trip cost and break-even bps from the same `FeeModel` path will make fee assumptions easier to audit before relying on ENTER guidance.
+- expected_result: dashboard custom fee mode asks for preview price/share count and displays round-trip cost plus break-even bps for the selected market.
+- files_changed: `app/dashboard.py`, `app/ui_text.py`, tests, `TODO.md`, docs.
+- commands_run: `python -m py_compile app\dashboard.py app\ui_text.py tests\test_dashboard_model_audit.py`; focused fee preview pytest.
+- test_result: 11 passed.
+- metric_result: UI fee transparency changed; trigger rules, baselines, fills, and accounting did not change.
+- observed_failure: market-specific fee settings were configurable but not immediately interpretable as an execution hurdle.
+- decision: KEEP.
+- next_highest_value_question: should current `TradeIntent` expose break-even bps beside net edge in the main decision card?
+- known_blockers: preview still depends on user-entered assumptions and does not verify live broker fee schedules.
+
+## 2026-06-21 - Market-specific custom fee plumbing
+
+- current_baseline: `FeeModel` supported A-share official fee components and US SEC/FINRA/broker fields, but CLI/dashboard custom fee inputs still covered mostly the legacy generic fields.
+- hypothesis: professional decision support needs the same market-specific round-trip cost fields available through user-facing configuration, not only hard-coded profiles.
+- expected_result: CLI exposes A-share official bps/min-commission and US SEC/FINRA/broker/platform fields; dashboard custom fee mode preserves and surfaces market-specific fields; tests cover propagation.
+- files_changed: `app/cli.py`, `app/dashboard.py`, `app/ui_text.py`, tests, `TODO.md`, docs.
+- commands_run: `python -m py_compile app\cli.py app\dashboard.py app\ui_text.py tests\test_cli.py tests\test_dashboard_model_audit.py tests\test_fee_model.py tests\test_fee_profiles.py`; focused fee plumbing pytest.
+- test_result: 15 passed.
+- metric_result: configurable fee inputs changed; default profiles and locked baselines were not updated.
+- observed_failure: custom fee mode could under-configure market-specific costs, especially for US fee fields.
+- decision: KEEP.
+- next_highest_value_question: should the dashboard show a compact break-even bps preview next to custom fee inputs?
+- known_blockers: user-specific broker schedules still need operator verification before live use.
+
+## 2026-06-21 - Model-audit review guidance and custom-fee market fix
+
+- current_baseline: after subtractive execution changes, the model audit correctly entered `REVIEW` against the previous locked baseline, but the output did not explicitly explain how the operator should treat that state; dashboard custom fee config also failed to preserve the selected market key.
+- hypothesis: review guidance should make baseline drift actionable without updating the baseline automatically, and custom fee paths must preserve market-specific fee routing.
+- expected_result: audit JSON/dashboard expose a clear human-review gate message for locked-OOS drift; OK reports still say no baseline update is needed; US custom fee configs remain `US_EQUITY`.
+- files_changed: `research/model_audit.py`, `app/dashboard.py`, `tests/test_model_audit.py`, `tests/test_dashboard_model_audit.py`, `TODO.md`, docs.
+- commands_run: `python -m py_compile research\model_audit.py app\dashboard.py tests\test_model_audit.py tests\test_dashboard_model_audit.py`; `python -m pytest tests\test_model_audit.py tests\test_dashboard_model_audit.py -q -p no:cacheprovider --basetemp=.runtime\pytest-tmp-audit-guidance2`.
+- test_result: 8 passed.
+- metric_result: audit metadata and fee-routing correctness changed; no locked baseline was mutated, and no fills/PnL/cost-basis reduction are inferred.
+- observed_failure: `REVIEW` was structurally correct but not self-explanatory enough for operator review, and custom dashboard fee config could lose market identity.
+- decision: KEEP.
+- next_highest_value_question: should the user approve a locked baseline update after reviewing the simplified execution semantics?
+- known_blockers: locked baseline update requires explicit human approval token; only five public-feed locked OOS rows are registered.
+
+## 2026-06-21 - Subtractive intraday execution simplification
+
+- current_baseline: prior diagnostic work exposed detailed `PROBE` / `ADD` / `CONFIRM` / `CLOSE_READY` states on the main lifecycle path, and default costs did not yet separate A-share official components from US SEC/TAF style fees.
+- hypothesis: live decision support should keep the main execution language small while retaining rich diagnostics behind the scenes; entry decisions should require market-aware round-trip cost plus an explicit edge buffer.
+- expected_result: operator-facing lifecycle collapses to `NO_TRADE`, `WATCH`, `ENTER`, `EXIT`, and `ABORT`; main chart shows only enter/exit/abort events; default auto-add is disabled; A-share and US fee models share explicit estimate helpers; trigger entries require true round-trip costs plus a 5 bps buffer.
+- files_changed: `core/fee_model.py`, `core/fee_profiles.py`, `research/trigger_engine.py`, `research/opportunity_lifecycle.py`, `app/dashboard.py`, `app/cli.py`, `app/position_state.py`, `app/ui_text.py`, tests, `TODO.md`, docs.
+- commands_run: focused `py_compile` for touched files; focused pytest for fee, trigger, lifecycle, dashboard, order-ticket, execution-sensitivity, evaluation, audit, and threshold modules; `python -m compileall .`; attempted full `python -m pytest -q`.
+- test_result: compile passed; focused relevant pytest groups passed; compileall exited 0. Full pytest could not produce a clean final report because pytest hit Windows `PermissionError` iterating its basetemp during session finish.
+- metric_result: trigger/lifecycle semantics and default cost gates changed; no fills, routed orders, realized PnL, or countable cost-basis reduction are inferred.
+- observed_failure: too many diagnostic states on the main path made the chart/action language harder to operate; default edge checks could understate market-specific round-trip costs.
+- decision: KEEP.
+- next_highest_value_question: should the locked model-audit baseline remain in review state until the user explicitly approves a baseline update?
+- known_blockers: only five public-feed locked OOS rows are registered, and full-suite pytest is locally blocked by Windows temp-directory permissions.
+
+## 2026-06-21 - US/Yahoo market module
+
+- current_baseline: dashboard and CLI supported A-share/Eastmoney and Korea/Yahoo, but no explicit US stock route existed; using Yahoo generically risked inheriting Korea market hours or A-share lot/fee assumptions.
+- hypothesis: a third `US / Yahoo Finance` market source can reuse the Yahoo minute-bar adapter while keeping market rules, lot sizing, fee defaults, source caveats, and saved-position source mapping explicit.
+- expected_result: dashboard exposes a US option with ticker examples such as `AAPL`; CLI accepts `--data-source us_yahoo`; US rules use 1-share lot size, 09:30-16:00 regular-session times, and no ordinary daily price-limit assumption.
+- files_changed: `app/dashboard.py`, `app/cli.py`, `app/ui_text.py`, `core/fee_profiles.py`, `research/source_disclosure.py`, tests, `TODO.md`, docs.
+- commands_run: `python -m py_compile app\dashboard.py app\cli.py app\ui_text.py core\fee_profiles.py research\source_disclosure.py data\yahoo.py tests\test_yahoo.py tests\test_dashboard_risk_limits.py tests\test_fee_profiles.py tests\test_source_disclosure.py tests\test_data_quality.py tests\test_cli.py`; `python -m pytest tests\test_yahoo.py tests\test_dashboard_risk_limits.py tests\test_fee_profiles.py tests\test_source_disclosure.py tests\test_data_quality.py tests\test_cli.py::test_cli_us_yahoo_uses_us_fee_profile_and_rules tests\test_cli.py::test_cli_position_snapshot_maps_us_market_to_us_yahoo_source -q --basetemp=.runtime\pytest-tmp-us-yahoo -o cache_dir=.runtime\pytest-cache-us-yahoo`; `python -m app.cli trigger --scenario mean_revert --data-source us_yahoo --held-qty 100 --settled-sellable-qty 100 --purchasable-qty 10 --max-t-ratio 0.10 --risk-preset balanced --no-position-state`.
+- test_result: compile passed; focused pytest 29 passed with local pytest cache warnings only; CLI scenario smoke completed and selected `us_prototype_conservative`.
+- metric_result: market plumbing, fee defaults, source disclosure, and rule defaults changed; no live Yahoo fetch, fills, PnL, or cost-basis reduction are inferred.
+- observed_failure: non-A-share Yahoo support was Korea-specific, so adding US without a separate source would blur market hours and fee assumptions.
+- decision: KEEP.
+- next_highest_value_question: should US support get live-network smoke validation for a representative ticker after the user confirms that Yahoo public data is acceptable for prototype use?
+- known_blockers: Yahoo remains a public research/prototype feed with approximate turnover amount and no broker-confirmed quote, holdings, routing, fill, FX, or settlement validation.
+
+## 2026-06-21 - Per-session ledger summary
+
+- current_baseline: closeout reported whether cost-basis reduction was countable, but did not provide a compact ledger separating realized/countable reduction from non-countable blocked pair cash and no-action days.
+- hypothesis: a separate ledger summary will make EOD review more useful without weakening closeout gates or implying fills/PnL.
+- expected_result: CLI and dashboard expose a session ledger with realized countable reduction, blocked pair net cash, no-action-day flag, and row-level categories.
+- files_changed: `app/session_ledger.py`, `app/cli.py`, `app/dashboard.py`, tests, `TODO.md`, docs.
+- commands_run: `python -m py_compile app\session_ledger.py app\session_closeout.py app\cli.py app\dashboard.py tests\test_session_ledger.py tests\test_dashboard_session_closeout.py tests\test_session_closeout.py tests\test_end_of_day_review.py`; `python -m pytest tests\test_session_ledger.py tests\test_dashboard_session_closeout.py tests\test_session_closeout.py tests\test_end_of_day_review.py -q --basetemp=.runtime\pytest-tmp-ledger-core -o cache_dir=.runtime\pytest-cache-ledger-core`; `python -m app.cli trigger --scenario mean_revert --held-qty 10000 --settled-sellable-qty 10000 --purchasable-qty 10000 --max-t-ratio 0.10 --risk-preset defensive --ignore-fees --no-position-state`.
+- test_result: compile passed; focused pytest 16 passed; CLI trigger smoke completed and emitted `session_ledger`; local pytest cache warnings only.
+- metric_result: EOD accounting summary changed; no new fills, PnL, or cost-basis reduction are inferred.
+- observed_failure: non-countable pair cash and no-action sessions were visible only indirectly through closeout details.
+- decision: KEEP.
+- next_highest_value_question: should the accumulated model/accounting changes be reviewed with the user before adding more scope?
+- known_blockers: only five public-feed locked OOS rows are registered, so this remains an accounting clarity improvement, not evidence of profitability.
+
+## 2026-06-21 - Broker/manual fill freshness checks
+
+- current_baseline: closeout and EOD review checked manual pair balance, broker reconciliation, inventory restoration, and risk usage, but did not warn when the available manual fills or broker export rows belonged to an older session.
+- hypothesis: closeout should surface stale manual/broker evidence before final EOD signoff, without converting stale rows into countable cost-basis reduction.
+- expected_result: session closeout includes a `fill_freshness` check comparing manual-fill and broker-export row dates with the session date; EOD review inherits WARN status from closeout freshness warnings.
+- files_changed: `app/session_closeout.py`, `app/end_of_day_review.py`, `app/cli.py`, `app/dashboard.py`, tests, `TODO.md`, docs.
+- commands_run: `python -m py_compile app\session_closeout.py app\end_of_day_review.py app\cli.py app\dashboard.py tests\test_session_closeout.py tests\test_end_of_day_review.py tests\test_dashboard_session_closeout.py tests\test_dashboard_end_of_day_review.py`; `python -m pytest tests\test_session_closeout.py tests\test_end_of_day_review.py tests\test_dashboard_session_closeout.py tests\test_dashboard_end_of_day_review.py -q --basetemp=.runtime\pytest-tmp-freshness-core -o cache_dir=.runtime\pytest-cache-freshness-core`; `python -m pytest tests\test_cli.py::test_cli_fee_config_is_explicitly_configurable tests\test_cli.py::test_cli_default_fee_profile_is_costed_not_zero_fee tests\test_cli.py::test_cli_zero_fee_requires_explicit_flag_or_profile -q --basetemp=.runtime\pytest-tmp-freshness-cli-basic -o cache_dir=.runtime\pytest-cache-freshness-cli-basic`; `python -m app.cli trigger --scenario mean_revert --held-qty 10000 --settled-sellable-qty 10000 --purchasable-qty 10000 --max-t-ratio 0.10 --risk-preset defensive --ignore-fees --no-position-state`.
+- test_result: compile passed; closeout/EOD/dashboard focused tests 13 passed; CLI basic tests 3 passed; CLI trigger smoke completed and emitted `fill_freshness`; local pytest cache warnings only. A combined run including all `tests\test_cli.py` hit local Windows `tmp_path` cleanup/setup permission errors unrelated to application assertions.
+- metric_result: closeout warning semantics changed; no fills, PnL, or countable cost-basis reduction are inferred from stale rows.
+- observed_failure: old broker/manual records could be present while the current session had no fresh execution evidence.
+- decision: KEEP.
+- next_highest_value_question: should the app add a per-session realized-vs-unrealized ledger separating countable reduction from blocked pair cash?
+- known_blockers: only five public-feed locked OOS rows are registered, so this remains an operational audit guard, not evidence of profitability.
+
+## 2026-06-21 - Bounded multi-leg lifecycle state
+
+- current_baseline: lifecycle ADD handling had hard-coded leg count, spacing, and price-improvement thresholds, and it did not expose a total T position cap.
+- hypothesis: explicit multi-leg bounds will make probe/add diagnostics safer by preventing unlimited same-side averaging and explaining when a next leg is disallowed.
+- expected_result: lifecycle ADD requires same-side trigger, max-leg room, total T position cap room, minimum minutes since last leg, and required price improvement versus the prior leg.
+- files_changed: `research/trigger_engine.py`, `research/opportunity_lifecycle.py`, `tests/test_opportunity_lifecycle.py`, `TODO.md`, docs.
+- commands_run: `python -m py_compile research\trigger_engine.py research\opportunity_lifecycle.py tests\test_opportunity_lifecycle.py tests\test_trigger_engine.py tests\test_dashboard_signals.py`; `python -m pytest tests\test_opportunity_lifecycle.py tests\test_trigger_engine.py tests\test_dashboard_signals.py -q --basetemp=pytest_tmp_bounded_multileg -o cache_dir=pytest_cache_bounded_multileg`.
+- test_result: 30 passed; local pytest cache warnings only.
+- metric_result: signal lifecycle diagnostics changed; no fills, PnL, or countable cost-basis reduction are inferred.
+- observed_failure: multi-leg scan semantics were implicit and could not explain cap or spacing failures.
+- decision: KEEP.
+- next_highest_value_question: should broker/export freshness checks warn when EOD review inputs are stale versus session date?
+- known_blockers: only five public-feed locked OOS rows are registered, so this remains a research-control improvement, not evidence of profitability.
+
+## 2026-06-21 - Soft down-regime B/S gating
+
+- current_baseline: down regimes treated B->S mostly as a hard allow/block decision, so weak-down probe sizing and strong-down exhaustion requirements were not explicit.
+- hypothesis: separating weak-down, strong-down, and crash-down profiles will make B->S safer and more interpretable without weakening the no-future-leakage rule.
+- expected_result: weak-down B->S can trigger only as reduced-size probe; strong-down B->S needs regime-adjusted deviation plus strong downside exhaustion; crash-like downtrends block B->S.
+- files_changed: `research/trigger_engine.py`, `tests/test_trigger_engine.py`, `TODO.md`, docs.
+- commands_run: `python -m py_compile research\trigger_engine.py research\opportunity_lifecycle.py app\dashboard.py tests\test_trigger_engine.py tests\test_opportunity_lifecycle.py tests\test_dashboard_signals.py`; `python -m pytest tests\test_trigger_engine.py tests\test_opportunity_lifecycle.py tests\test_dashboard_signals.py -q --basetemp=pytest_tmp_soft_regime -o cache_dir=pytest_cache_soft_regime`.
+- test_result: 28 passed; local pytest cache warnings only.
+- metric_result: trigger gating and sizing semantics changed; no fills, PnL, or countable cost-basis reduction are inferred.
+- observed_failure: B->S logic did not distinguish weak pullback repair from adding into strong trend weakness.
+- decision: KEEP.
+- next_highest_value_question: should multi-leg state enforce max legs and price-improvement requirements across probe/add/confirm states?
+- known_blockers: only five public-feed locked OOS rows are registered, so this remains a research-control improvement, not evidence of profitability.
+
 ## 2026-06-20 - B/S lifecycle diagnostics stage 1
 
 - current_baseline: chart lifecycle markers collapsed first-leg opportunities into generic `OPEN`, while the trigger engine exposed limited diagnostics for why BS was late or blocked.

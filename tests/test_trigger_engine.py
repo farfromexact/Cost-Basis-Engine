@@ -32,6 +32,17 @@ def test_regime_block_prevents_trade_before_start_time() -> None:
     assert intent.regime_type is RegimeType.NO_TRADE
 
 
+def test_regime_blocks_new_enter_after_no_new_trade_time() -> None:
+    intent = _engine().evaluate(
+        "TEST",
+        _bars([10.0, 10.0, 10.2], start_hour=14, start_minute=30),
+        _position(),
+    )
+
+    assert intent.action_type is ActionType.NO_TRADE
+    assert intent.regime_type is RegimeType.LATE_SESSION
+
+
 def test_trend_up_suppresses_sell_to_buy() -> None:
     intent = _engine().evaluate(
         "TEST",
@@ -52,10 +63,12 @@ def test_trend_down_suppresses_buy_to_sell() -> None:
 
     assert intent.action_type is ActionType.WATCH_BUY_TO_SELL
     assert intent.regime_type is RegimeType.TREND_DOWN
+    assert intent.regime_decision is not None
+    assert intent.regime_decision.regime_profile == "CRASH_DOWN"
 
 
 def test_vwap_deviation_with_insufficient_net_edge_only_watches() -> None:
-    engine = TriggerEngine(RulesConfig(risk_buffer_pct=0.0))
+    engine = TriggerEngine(RulesConfig(max_t_ratio=0.10, risk_buffer_pct=0.0))
     intent = engine.evaluate(
         "TEST",
         _bars([10.0, 10.0, 10.0, 10.08]),
@@ -64,6 +77,34 @@ def test_vwap_deviation_with_insufficient_net_edge_only_watches() -> None:
 
     assert intent.action_type is ActionType.WATCH_SELL_TO_BUY
     assert intent.estimated_net_edge <= 0
+
+
+def test_round_trip_edge_buffer_blocks_enter() -> None:
+    engine = TriggerEngine(
+        RulesConfig(
+            max_t_ratio=0.10,
+            sb_trigger_deviation=0.003,
+            sb_watch_deviation=0.002,
+            risk_buffer_pct=0.0,
+            min_amount_ratio=1.0,
+            min_edge_buffer_bps=200.0,
+        ),
+        zero_fee_model(),
+    )
+    intent = engine.evaluate(
+        "TEST",
+        _bars([10.0, 10.0, 10.0, 10.12]),
+        _position(),
+    )
+
+    assert intent.action_type is ActionType.WATCH_SELL_TO_BUY
+    assert intent.deviation_decision is not None
+    assert intent.deviation_decision.expected_gross_edge_bps > 0
+    assert intent.deviation_decision.net_edge_bps < intent.deviation_decision.min_edge_buffer_bps
+    payload = intent.as_dict()
+    assert payload["estimated_round_trip_cost_bps"] == intent.deviation_decision.estimated_round_trip_cost_bps
+    assert payload["net_edge_bps"] == intent.deviation_decision.net_edge_bps
+    assert payload["min_edge_buffer_bps"] == intent.deviation_decision.min_edge_buffer_bps
 def test_deviation_below_trigger_threshold_only_watches() -> None:
     intent = _engine().evaluate(
         "TEST",
@@ -108,6 +149,11 @@ def test_sell_to_buy_triggers_when_regime_deviation_and_inventory_pass() -> None
     assert intent.action_type is ActionType.TRIGGER_SELL_TO_BUY
     assert intent.suggested_qty == 100
     assert intent.expected_reversion_price < intent.reference_price
+    payload = intent.as_dict()
+    assert payload["inventory_ok"] is True
+    assert payload["sellable_after_trade"] == 900
+    assert payload["inventory_delta_after_trade"] == -100
+    assert payload["capital_required"] == 0.0
 
 
 def test_buy_to_sell_triggers_when_regime_deviation_and_inventory_pass() -> None:
@@ -124,6 +170,56 @@ def test_buy_to_sell_triggers_when_regime_deviation_and_inventory_pass() -> None
     assert intent.deviation_decision.anchor_type in {"NEUTRAL", "VWAP_REVERSION", "VWAP_RESISTANCE"}
     assert intent.deviation_decision.exhaustion_score >= 0
     assert intent.deviation_decision.reason_codes
+
+
+def test_weak_down_buy_to_sell_triggers_reduced_probe_size() -> None:
+    engine = TriggerEngine(
+        RulesConfig(
+            bs_trigger_deviation=-0.002,
+            bs_watch_deviation=-0.001,
+            risk_buffer_pct=0.0,
+            min_amount_ratio=1.0,
+            trend_day_return_pct=0.02,
+            trend_recent_return_pct=0.004,
+        ),
+        zero_fee_model(),
+    )
+    intent = engine.evaluate(
+        "TEST",
+        _bars([10.0, 9.98, 9.95, 9.92, 9.90, 9.88, 9.89]),
+        _position(target_qty=10_000, current_total_qty=10_000, settled_sellable_qty=10_000, purchasable_qty=10_000),
+    )
+
+    assert intent.action_type is ActionType.TRIGGER_BUY_TO_SELL
+    assert intent.regime_decision is not None
+    assert intent.regime_decision.regime_profile == "WEAK_DOWN"
+    assert intent.suggested_qty == 200
+    assert intent.inventory_decision is not None
+    assert any("Regime position multiplier" in reason for reason in intent.inventory_decision.reasons)
+
+
+def test_strong_down_buy_to_sell_requires_strong_exhaustion() -> None:
+    engine = TriggerEngine(
+        RulesConfig(
+            bs_trigger_deviation=-0.002,
+            bs_watch_deviation=-0.001,
+            risk_buffer_pct=0.0,
+            min_amount_ratio=1.0,
+            trend_day_return_pct=0.02,
+            trend_recent_return_pct=0.004,
+        ),
+        zero_fee_model(),
+    )
+    intent = engine.evaluate(
+        "TEST",
+        _bars([10.0, 9.96, 9.91, 9.86, 9.82, 9.78]),
+        _position(target_qty=10_000, current_total_qty=10_000, settled_sellable_qty=10_000, purchasable_qty=10_000),
+    )
+
+    assert intent.action_type is ActionType.WATCH_BUY_TO_SELL
+    assert intent.regime_decision is not None
+    assert intent.regime_decision.regime_profile == "STRONG_TREND_DOWN"
+    assert any("strong downside exhaustion" in blocker for blocker in intent.blockers)
 
 
 def test_sell_to_buy_rejected_when_settled_sellable_is_insufficient() -> None:
@@ -202,6 +298,7 @@ def _engine() -> TriggerEngine:
             sb_watch_deviation=0.002,
             bs_trigger_deviation=-0.003,
             bs_watch_deviation=-0.002,
+            max_t_ratio=0.10,
             risk_buffer_pct=0.0,
             min_amount_ratio=1.0,
             trend_day_return_pct=0.02,

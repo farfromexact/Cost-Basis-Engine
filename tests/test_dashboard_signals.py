@@ -5,12 +5,14 @@ import pandas as pd
 from app.dashboard import (
     _bars_until_replay_time,
     _current_intent_marker_row,
+    _inventory_metric_payload,
+    _main_chart_signal_markers,
     _nearest_closed_minute,
     _scan_signal_markers,
     _selected_time_from_chart_event,
 )
 from core.models import MinuteBar
-from research.trigger_engine import ActionType, RegimeType, SideCandidate, TradeIntent
+from research.trigger_engine import ActionType, InventoryDecision, RegimeType, SideCandidate, TradeIntent
 
 
 def test_scan_signal_markers_finds_sell_to_buy_trigger() -> None:
@@ -31,8 +33,10 @@ def test_scan_signal_markers_finds_sell_to_buy_trigger() -> None:
 
     assert not markers.empty
     assert "SB" in set(markers["signal"])
-    assert markers.iloc[-1]["action"] == "Probe S->B"
-    assert markers.iloc[-1]["state"] == "PROBE"
+    assert markers.iloc[-1]["action"] == "ENTER_SB"
+    assert markers.iloc[-1]["state"] == "ENTER"
+    assert markers.iloc[-1]["debug_state"] == "PROBE"
+    assert "deviation_bps" in markers.columns
     assert "reason_codes" in markers.columns
     assert "why_not_earlier" in markers.columns
 
@@ -102,6 +106,44 @@ def test_current_intent_marker_uses_latest_closed_minute_decision() -> None:
     assert "latest closed minute" in row["note"]
 
 
+def test_inventory_metric_payload_exposes_sellability_state() -> None:
+    intent = TradeIntent(
+        action_type=ActionType.TRIGGER_SELL_TO_BUY,
+        symbol="603236",
+        timestamp="2026-06-19 10:14:00",
+        side=SideCandidate.SELL_TO_BUY,
+        suggested_qty=100,
+        suggested_ratio=0.10,
+        reference_price=10.12,
+        trigger_price=10.12,
+        expected_reversion_price=10.05,
+        invalidation_price=10.20,
+        max_wait_minutes=45,
+        estimated_gross_edge=10.0,
+        estimated_fee=0.0,
+        estimated_slippage=0.0,
+        estimated_net_edge=10.0,
+        expected_cost_reduction_per_share=0.10,
+        confidence=90,
+        regime_type=RegimeType.MEAN_REVERTING,
+        inventory_decision=InventoryDecision(
+            executable=True,
+            suggested_qty=100,
+            suggested_ratio=0.10,
+            capital_required=0.0,
+            sellable_after_trade=900,
+            inventory_delta_after_trade=-100,
+        ),
+    )
+
+    payload = _inventory_metric_payload(intent)
+
+    assert payload["inventory_ok"] is True
+    assert payload["sellable_after_trade"] == 900
+    assert payload["inventory_delta_after_trade"] == -100
+    assert payload["capital_required"] == 0.0
+
+
 def test_replay_bars_truncate_future_minutes() -> None:
     bars = _bars([10.0, 10.1, 10.2, 10.3])
 
@@ -157,8 +199,24 @@ def test_scan_signal_markers_collapses_continuous_same_side_triggers() -> None:
         marker_cooldown_minutes=10,
     )
 
-    trigger_signals = list(markers.loc[markers["state"].isin(["PROBE", "CONFIRM"]), "signal"])
+    trigger_signals = list(markers.loc[markers["state"] == "ENTER", "signal"])
     assert trigger_signals == ["SB"]
+
+
+def test_main_chart_signal_markers_hide_watch_and_debug_only_states() -> None:
+    markers = pd.DataFrame(
+        [
+            {"state": "WATCH", "debug_state": "WATCH", "action": "WATCH_BS"},
+            {"state": "ENTER", "debug_state": "PROBE", "action": "ENTER_BS"},
+            {"state": "EXIT", "debug_state": "CLOSE_READY", "action": "EXIT_BS"},
+            {"state": "ABORT", "debug_state": "BLOCKED", "action": "ABORT_BS"},
+        ]
+    )
+
+    visible = _main_chart_signal_markers(markers)
+
+    assert list(visible["state"]) == ["ENTER", "EXIT", "ABORT"]
+    assert "PROBE" not in set(visible["state"])
 
 
 def _bars(closes: list[float]) -> list[MinuteBar]:

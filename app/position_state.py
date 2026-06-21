@@ -21,7 +21,7 @@ class PositionSnapshot:
     held_qty: int = 151400
     settled_sellable_qty: int = 151400
     purchasable_qty: int = 15100
-    max_t_ratio: float = 0.10
+    max_t_ratio: float = 0.05
     max_single_trade_qty: int | None = None
     risk_limit_preset_id: str = DEFAULT_RISK_LIMIT_PRESET_ID
     fee_profile_id: str = DEFAULT_A_SHARE_FEE_PROFILE_ID
