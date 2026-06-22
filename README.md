@@ -1,123 +1,155 @@
-# 降本神器 / Cost Basis Engine
+# Cost Basis Engine / 降本神器
 
-本项目是针对单一股票的本地研究、历史回放和盘中提示引擎。当前重点支持 A 股普通股票，也提供韩国股票的 Yahoo Finance 分钟线提示入口。它只研究“在目标持股数量约束下，闭环做 T 是否相对全天不操作产生净现金收益”，不判断长期投资价值，不自动下单，不承诺盈利。
+Cost Basis Engine is a local Streamlit research dashboard for single-stock intraday cost-basis management. It focuses on one practical question: under a target inventory constraint, can a closed intraday T trade reduce cost basis versus doing nothing after fees, taxes, slippage, and inventory rules are applied?
 
-## 当前能力
+The project is built as a research and decision-support prototype. It does not connect to brokers, does not place orders, and does not provide investment advice.
 
-- 可配置买卖佣金、最低佣金、印花税、过户费、其他规费和滑点。
-- 区分 `settled_sellable_qty` 与 `today_bought_locked_qty`，不会把今日买入误当作当日可卖。
-- 支持一个最小 S->B 策略：先卖出少量已交收底仓，之后在更低价格买回同等数量。
-- 支持三层触发引擎：`Regime -> Deviation -> Inventory -> TradeIntent`。
-- 提供 Streamlit 页面，输入市场/数据源、股票代码、已持有股数、可继续购买股数后自动抓取最新分钟线并输出触发意图。
-- 韩国股票入口使用 Yahoo Finance 分钟线，三星普通股可输入 `005930.KS`、`005930`、`三星`；三星优先股可输入 `005935.KS`。
-- 逐分钟回放只在第 `t` 根分钟线结束后生成信号，并最早在第 `t+1` 根分钟线开盘模拟成交。
-- 内置合成场景、无操作基准、核心指标报告和 pytest 测试。
+## Streamlit Gallery
 
-## 快速运行
+### Intraday Decision Dashboard
 
-```powershell
-python -m app.cli replay --scenario mean_revert --target-qty 1000 --settled-sellable-qty 1000 --trade-qty 100
-python -m pytest
+![Intraday decision dashboard](docs/assets/readme/streamlit-intraday-decision.jpg)
+
+The intraday page turns market data, position constraints, fee assumptions, and risk limits into a compact trade intent. The UI surfaces the current action, confidence, suggested quantity, cost-reduction estimate, blockers, and the decision rationale.
+
+### Execution And EOD Review
+
+![Execution and EOD review](docs/assets/readme/streamlit-execution-review.jpg)
+
+The execution page is designed for operational discipline after a signal appears. It collects manual execution checks, broker-import reconciliation, pre-trade tickets, post-trade review, live risk usage, session closeout, and execution journal outputs.
+
+### Research And Audit Controls
+
+![Research and audit controls](docs/assets/readme/streamlit-research-audit.jpg)
+
+The research page keeps heavier validation jobs separate from the live decision view. It provides entry points for locked out-of-sample scenario evaluation, threshold experiments, model-change audit, and baseline governance.
+
+## What This Demonstrates
+
+- A Streamlit decision cockpit for a finance workflow, with a sidebar-driven configuration model and multi-page review flow.
+- A layered signal engine: `Regime -> Deviation -> Inventory -> TradeIntent`.
+- Inventory-aware T-trading logic that distinguishes sellable settled shares from same-day locked buys.
+- Explicit fee, tax, slippage, position-size, and risk-limit handling before a suggested action is shown.
+- A research-to-operations loop: intraday signal, pre-trade checklist, execution journal, post-trade review, and model audit.
+- Market data adapters for A-share / Eastmoney and Yahoo Finance-backed Korea / US examples.
+
+## Core Workflow
+
+1. Choose a market/data source and symbol.
+2. Enter held quantity, purchasable quantity, sellable quantity, risk preset, fee profile, and optional open-pair state.
+3. Fetch recent intraday bars and build VWAP/deviation features.
+4. Evaluate the layered trigger engine.
+5. Show one of the unified actions:
+   - `NO_TRADE`
+   - `WATCH_SELL_TO_BUY`
+   - `TRIGGER_SELL_TO_BUY`
+   - `WATCH_BUY_TO_SELL`
+   - `TRIGGER_BUY_TO_SELL`
+   - `MANAGE_OPEN_PAIR`
+   - `FORCE_CLOSE_OR_RESTORE`
+6. Review execution readiness and end-of-day closeout if a trade is actually taken.
+
+## Key Capabilities
+
+- Configurable commission, minimum commission, stamp tax, transfer fee, other fees, and slippage.
+- A-share lot-size and same-day sellability constraints.
+- Korea and US Yahoo Finance examples for minute-bar signal prototyping.
+- Compact live decision mode and expanded diagnostic mode.
+- Signal marker scan for opportunity lifecycle review.
+- Manual fill capture and broker-export reconciliation.
+- Pre-trade order ticket preview and execution-sensitivity checks.
+- Session risk usage, session closeout, session ledger, and end-of-day review.
+- Locked OOS evaluation, threshold experiments, and model-change audit reports.
+- Pytest coverage for accounting, trigger behavior, risk limits, dashboard outputs, and CLI paths.
+
+## Quick Start
+
+Create a local environment and install the runtime dependencies:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
 ```
 
-启动 Streamlit：
+Launch the Streamlit dashboard:
 
-```powershell
+```bash
 streamlit run app/dashboard.py
 ```
 
-页面核心输入：
+Run tests:
 
-- 市场/数据源；
-- 股票代码；
-- 已经持有股数；
-- 可继续购买股数。
+```bash
+python -m pytest
+```
 
-高级输入包括当前可卖股数、单次做 T 上限、是否暂不考虑佣金/税费，以及已有未闭合 Pair。
+## CLI Examples
 
-三层触发 CLI：
+Replay a synthetic mean-reversion scenario:
 
-```powershell
+```bash
+python -m app.cli replay --scenario mean_revert --target-qty 1000 --settled-sellable-qty 1000 --trade-qty 100
+```
+
+Evaluate the trigger engine with an A-share symbol:
+
+```bash
 python -m app.cli trigger --symbol 603236 --held-qty 151400 --purchasable-qty 15100 --ignore-fees
+```
+
+Evaluate a Yahoo Finance-backed example:
+
+```bash
 python -m app.cli trigger --data-source yahoo --symbol 005930.KS --held-qty 1000 --purchasable-qty 100 --ignore-fees
 ```
 
-验证当天实盘分钟线时传入 A 股代码：
+Run a prompt-style intraday scan:
 
-```powershell
-python -m app.cli replay --symbol 600519 --target-qty 1000 --settled-sellable-qty 1000 --trade-qty 100
-```
-
-`--symbol` 会通过东财分钟趋势接口读取最近 1 个交易日数据。该入口只用于研究验证，真实使用前仍需核验数据授权、延迟和字段定义。
-
-韩国股票的 `trigger --data-source yahoo` 会通过 Yahoo chart 接口读取最近 1 个交易日 1 分钟数据。该接口没有真实成交额字段，当前用 `close * volume` 近似成交额，因此只适合做提示原型，不适合直接做严格成交额回测。韩国分支默认使用 1 股交易单位、±30% 日涨跌幅、常规盘 09:00-15:30 的时间框架。
-
-盘中提示 `SB` 或 `BS`：
-
-```powershell
+```bash
 python -m app.cli prompt --symbol 603236 --bankroll 8000000 --scan
 ```
 
-- `SB_OPEN`: 先卖出一笔可卖底仓，计划回落后买回。
-- `BS_OPEN`: 先买入一笔，计划反弹后卖出原有可卖底仓。
-- `HOLD`: 当前不提示开新 T。
+Monitor a symbol and print prompts periodically:
 
-新触发引擎统一输出：
-
-- `NO_TRADE`
-- `WATCH_SELL_TO_BUY`
-- `TRIGGER_SELL_TO_BUY`
-- `WATCH_BUY_TO_SELL`
-- `TRIGGER_BUY_TO_SELL`
-- `MANAGE_OPEN_PAIR`
-- `FORCE_CLOSE_OR_RESTORE`
-
-如果要让 `BS` 做现金约束校验，传入 `--cash`。
-
-如果已有未闭合 Pair，传入状态让提示器优先处理闭合：
-
-```powershell
-python -m app.cli prompt --symbol 603236 --bankroll 8000000 --open-pair-side SB --open-pair-price 53.98 --open-pair-qty 15100
-```
-
-## 自动监控和手机提示
-
-启动监控：
-
-```powershell
+```bash
 python -m app.cli monitor --symbol 603236 --bankroll 8000000 --interval-seconds 60
 ```
 
-默认只在控制台打印。手机推送可选：
+Optional push-notification providers are available through Bark, Pushplus, or a generic webhook:
 
-```powershell
+```bash
 python -m app.cli monitor --symbol 603236 --bankroll 8000000 --notify-provider bark --notify-token YOUR_BARK_KEY
 python -m app.cli monitor --symbol 603236 --bankroll 8000000 --notify-provider pushplus --notify-token YOUR_PUSHPLUS_TOKEN
 python -m app.cli monitor --symbol 603236 --bankroll 8000000 --notify-provider webhook --notify-url https://example.com/hook
 ```
 
-也可以用环境变量，避免 token 出现在命令历史里：
+## Repository Layout
 
-```powershell
-$env:CBE_NOTIFY_PROVIDER="pushplus"
-$env:CBE_NOTIFY_TOKEN="YOUR_TOKEN"
-python -m app.cli monitor --symbol 603236 --bankroll 8000000 --interval-seconds 60
+```text
+app/        Streamlit dashboard, CLI, execution journal, reconciliation, review flows
+core/       Accounting, inventory ledger, fee model, instrument rules, pair state
+data/       Eastmoney and Yahoo Finance data adapters plus validation/storage helpers
+research/   Trigger engine, features, evaluation, replay, risk limits, audit reports
+datasets/   Locked and sample OOS datasets
+docs/       Product, architecture, decision, evaluation, and research notes
+tests/      Unit and dashboard behavior tests
 ```
 
-监控不会假设你执行了提示。如果你已经开了一腿，重新启动时传入 `--open-pair-side`、`--open-pair-price`、`--open-pair-qty`，它会优先推送闭合提示。
+## Data And Risk Notes
 
-研究账本和 Pair 机制时，可以显式传入零费用配置：
+- Eastmoney and Yahoo Finance adapters are used for research/prototype data only. Confirm data licensing, latency, field definitions, and survivorship assumptions before any real trading workflow.
+- Yahoo Finance minute data does not provide true turnover for some markets; the prototype may approximate notional volume with `close * volume`.
+- Intraday replay only emits a signal after minute `t` closes and simulates the earliest possible fill at minute `t+1`, avoiding look-ahead behavior in the replay frame.
+- Cost-basis reduction is not counted as realized until both legs close, target inventory is restored, and fees/slippage are deducted.
 
-```powershell
-python -m app.cli replay --scenario mean_revert --target-qty 1000 --settled-sellable-qty 1000 --trade-qty 100 --min-commission 0 --buy-commission-rate 0 --sell-commission-rate 0 --stamp-tax-rate 0 --transfer-fee-rate 0 --buy-slippage-rate 0 --sell-slippage-rate 0
-```
+## Current Non-Goals
 
-## 当前不能做
+- No broker connection.
+- No automatic order placement.
+- No Level-2 order book, tick-by-tick queue modeling, or active-buy/sell pressure model.
+- No claim that any strategy is profitable.
 
-- 不连接券商，不自动下单。
-- 不使用 Level-2、逐笔委托、主动买卖强度或真实排队位置。
-- 不宣称策略盈利；当前只验证账本、费用、库存约束和无未来函数回放框架。
+## Portfolio Reference Angle
 
-## 核心指标
-
-CLI 会输出 `closed_t_net_pnl`、`excess_pnl_vs_hold`、`ending_quantity_delta`、`eod_inventory_restoration_rate`、`unclosed_pair_rate`、`total_fees`、`estimated_slippage`、`turnover`、`max_inventory_deviation`、`max_inventory_deviation_duration`、`missed_upside_tail`、`trade_count`、`net_pnl_per_10k_turnover` 等指标。
+This repository can be presented as a compact example of building a finance-focused decision-support app: data adapters, rules engine, risk controls, operational review surfaces, research audit modules, and a Streamlit UI that turns those pieces into a usable workflow.
